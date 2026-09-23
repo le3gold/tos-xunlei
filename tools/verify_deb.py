@@ -128,6 +128,14 @@ def verify(deb_store, cfg, verbose=True):
     base = os.path.basename(deb_store)
     c.ok(base == "%s_%s.deb" % (app, cfg["PLATFORM"]),
          "release asset must be named <appid>_<platform>.deb, got %r" % base)
+    # ---- version consistency: the developer platform compares config.ini,
+    #      DEBIAN/control and the Release tag, and requires xx.yy.zzz
+    c.ok(re.fullmatch(r"\d+\.\d+\.\d+", cfg["APP_VERSION"]),
+         "the developer platform only accepts xx.yy.zzz versions, got %r"
+         % cfg["APP_VERSION"])
+    c.ok(not cfg.get("PKG_RELEASE"),
+         "a package release suffix makes DEBIAN/control disagree with the "
+         "Release tag version; keep one version number everywhere")
 
     blob = open(deb_store, "rb").read()
     members = ar_members(blob)

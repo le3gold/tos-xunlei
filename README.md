@@ -3,6 +3,7 @@
 把迅雷官方的下载引擎 **3.23.7** 封装成 TOS 7 的应用（`deb` + `iframe` 小窗），
 在应用中心里点开就是**迅雷官方 WebUI**，以独立小窗形式打开。
 
+- 提审稿（要填进开发者后台的字段、自查清单）：`docs/SUBMISSION.md`
 - 调研过程与结论：`docs/RECON.md`
 - 真机实测记录：`docs/HARDWARE-VERIFICATION.md`
 - 上游来源与校验值：包内 `/usr/local/<应用ID>/PROVENANCE.md`
@@ -13,7 +14,7 @@
 |---|---|
 | 应用 ID | `le3gold-xunlei` |
 | 应用名称 | 迅雷 |
-| 版本 | `1.0.0-1`（发布 tag `v1.0.0`） |
+| 版本 | `1.0.0`（发布 tag `v1.0.0`） |
 | 平台 / 架构 | `x86_64` / `amd64` |
 | 打开方式 | **iframe 小窗**（`type: iframe`、`path: /le3gold-xunlei/`、可缩放、可最大化/最小化） |
 | 发布包名 | `le3gold-xunlei_x86_64.deb`（**文件名不带版本号**，版本由 tag 决定） |
@@ -32,7 +33,7 @@ python build.py
 - 首次构建会联网下载引擎（迅雷官方 CDN）与启动器（迅雷官方 SPK），
   之后使用 `build/` 缓存。
 - 输出：
-  - `out/le3gold-xunlei_1.0.0-1_amd64.deb` — 本地安装用
+  - `out/le3gold-xunlei_1.0.0_amd64.deb` — 本地安装用
   - `out/le3gold-xunlei_x86_64.deb` — **提交应用中心用**（文件名不带版本）
   - `out/le3gold-xunlei_x86_64.deb.sha256`
 - 构建结束会自动运行 `tools/verify_deb.py`：它独立解析 `ar` 与两个 tar，
