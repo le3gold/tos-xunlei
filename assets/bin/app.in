@@ -67,7 +67,7 @@ log "shared folder: ${SHARE_PATH}"
 #     recreated by hand, re-run:  sudo dpkg-reconfigure @@APP_ID@@
 
 # 2. App-owned runtime state. Never inside the shared folder.
-mkdir -p "${DATA_DIR}/bin" "${DATA_DIR}/.drive" "${DATA_DIR}/download" 2>/dev/null || true
+mkdir -p "${DATA_DIR}/bin" "${DATA_DIR}/.drive" 2>/dev/null || true
 
 # 2b. The engine needs somewhere it can actually write. Prefer the shared
 #     folder so the downloaded files show up over SMB/NFS. When TOS has not
@@ -90,6 +90,29 @@ else
 fi
 log "download folder: ${DOWNLOAD_PATH}"
 log "runtime folder: ${BIN_DIR}"
+
+# 2c. The engine advertises its own state directory as a second download root:
+#     the picker shows "<application>" (= ${DATA_DIR}) next to the shared
+#     folder, with a "download" child underneath it. That directory is on the
+#     system disk (/dev/md9 on this platform: 7.5 GB, about half of it already
+#     in use), so a task sent there could fill the system disk. Point it at the
+#     shared folder instead of leaving a real directory behind, and everything
+#     written under ${DATA_DIR}/download lands next to the other downloads.
+#     In the fallback above ${DATA_DIR}/download *is* the download target, so
+#     there it stays a real directory.
+if [ "${DOWNLOAD_PATH}" = "${SHARE_PATH}/download" ]; then
+    if [ -h "${DATA_DIR}/download" ]; then
+        rm -f "${DATA_DIR}/download" 2>/dev/null || true
+    elif [ -d "${DATA_DIR}/download" ]; then
+        # Never delete files the engine may already have written there: only
+        # an empty directory can give way to the link.
+        rmdir "${DATA_DIR}/download" 2>/dev/null || true
+    fi
+    if [ ! -e "${DATA_DIR}/download" ]; then
+        ln -sfn "${DOWNLOAD_PATH}" "${DATA_DIR}/download" 2>/dev/null || true
+    fi
+    log "app-directory download root: ${DATA_DIR}/download -> $(readlink "${DATA_DIR}/download" 2>/dev/null || echo 'left as a plain directory')"
+fi
 
 # 3. Never let a stale launcher socket block startup.
 rm -f "${DATA_DIR}/bin/pan-cli-launcher.sock" "${DATA_DIR}/pan-cli.pid"

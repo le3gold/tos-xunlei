@@ -270,7 +270,7 @@ TOS 桌面不给 `type: "iframe"` 的应用渲染标题栏，而是把一条 40p
 
 - 应用 ID / 版本 / 平台 / 资源名 / sha256：
   `le3gold-xunlei` / `1.0.0` / `x86_64` / `le3gold-xunlei_x86_64.deb` /
-  `fc6f9b9e2bdf54eb5307257067d652a72856f6efb78a589570305ed2b4fe2ce8`
+  `ce72466e3c1036659ca89ca322ba76118b2a0b9011cae33b8876ecb356842e94`
 - 真机：TOS 7（内核 6.12.63）安装后服务 `active` + `enabled`，引擎上报
   `download_paths: ["/Volume1/XunLeiPlus/download/"]`，且以应用用户身份实测可写该目录；
   `http://<NAS>:8181/le3gold-xunlei/app/` 返回 200，静态资源 200（1,527,665 字节），

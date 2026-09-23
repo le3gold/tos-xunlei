@@ -1,4 +1,4 @@
-# TOS 7 平台缺陷：非 root 应用无法访问共享文件夹
+# TOS 7 平台缺陷（1）：非 root 应用无法访问共享文件夹
 
 > 状态：已在真机复现，等待平台修复
 > 环境：TOS 7 / 内核 6.12.63+ / x86_64 TNAS
@@ -117,3 +117,93 @@ entry"），届时一并删除。
 | 以非 root 运行的 | 0（本应用除外） |
 | `/etc/systemd/system` 里显式声明 `User=` 的应用单元 | 1 个：`PHP74.service` -> `User=0` |
 | 带 ACL 条目的卷根 | **0** |
+---
+
+# TOS 7 平台缺陷（2）：iframe 应用窗口的关闭按钮在深色主题下不可见
+
+> 状态：已在真机复现并取证，等待平台修复
+> 环境：TOS 7 / 内核 6.12.63+ / x86_64 TNAS
+> 复现日期：2026-09-23
+> 发现场景：迅雷应用封装（`le3gold-xunlei`）
+
+## 1. 现象
+
+`type: "iframe"` 的应用，窗口右上角的关闭按钮 `×` 在浅色主题下正常，切到**深色主题**
+后默认完全看不见，只有鼠标浮上去、按钮底色转红时才出现。同一排的最小化 `−`、最大化
+`□`、帮助 `?` 三个按钮没有这个问题。
+
+## 2. 原因
+
+TOS 7 不为 iframe 应用画标题栏，而是在窗口顶部**覆盖**一条 40px 的
+`.tos-dialog-menu.micro`，四个按钮共用一条样式：
+
+```css
+.tos-dialog-menu > [class^=tos-button-] {
+  color: var(--common-font-level3);
+  background-repeat: no-repeat; background-position: 50%;
+}
+```
+
+其中最小化、最大化、帮助各自带一张 `background-image`（`button_minimize.svg` /
+`button_maximize.svg` / `button_help.svg`），颜色是**写死的** `#7C7C7C` 灰，与主题无关，
+压在任何底色上都看得见。
+
+**关闭按钮没有任何 `background-image`**，它用的是字体图标：
+
+```html
+<div class="tos-button-close"><i class="iconfont iconReject"></i></div>
+```
+
+于是它的颜色完全由 `--common-font-level3` 决定，而 TOS 给它定义了两个值：
+
+| 主题 | 定义位置 | `--common-font-level3` |
+|---|---|---|
+| 浅色 | `:root` | `rgba(0,0,0,0.45)` —— 深灰，压在白底上可见 |
+| 深色 | `html[data-theme=dark]` | `hsla(0,0%,100%,0.45)` —— **白 45%** |
+
+深色的 `白 45%` 是给深色标题栏准备的，而这条 40px 覆盖条**自己没有背景色**：那一格
+显示什么，取决于应用页面画了什么。迅雷的 SPA（以及 TOS 上大多数第三方 Web 应用）是
+浅色的，于是 `白 45%` 的 `×` 压在白色标题栏上 = 不可见。浮上去时平台把底色涂成
+`--common-error-color`（`#ff383c`）并把图标强制成 `#f7f8fa`，这才显形。
+
+平台其实**自带**正确的资源：`/usr/www/tos/img/button_close.525215ef.svg`
+（`fill="#7C7C7C"`，与另外三个按钮同色），在 `device-memory`、`device-lan`、`device-temperature`
+等组件里都在用 —— **只有窗口标题栏的关闭按钮没接上**。
+
+## 3. 取证
+
+| 观察项 | 依据 | 结果 |
+|---|---|---|
+| 关闭按钮的样式 | `grep -o 'tos-dialog-menu .tos-button-close[^}]*}' /usr/www/tos/css/*.css` | 只有 `position` / `border-radius` / `:hover`，**无 `background-image`** |
+| 另外三个按钮 | 同上 | 都有 `background-image:url(../img/button_*)` |
+| 关闭按钮的标记 | `chunk-*.js` | `e("i",{staticClass:"iconfont iconReject"})` |
+| 两个主题的取值 | `chunk-tos-components.*.css` | `:root` -> `rgba(0,0,0,.45)`；`html[data-theme=dark]` -> `hsla(0,0%,100%,.45)` |
+| 平台自带的关闭图标 | `cat img/button_close*.svg` | `fill="#7C7C7C"`，存在但标题栏未引用 |
+| iframe 是否被沙箱隔离 | `chunk-2a09363a*.js` | **无 `sandbox` 属性**，`src = window.origin + path` => 与桌面**同源** |
+
+## 4. 建议的平台修复（任一即可）
+
+1. **首选：给关闭按钮也接上 `background-image`。** 资源已在包里
+   （`img/button_close.svg`），一条选择器即可，四个按钮从此都与主题无关。
+2. **或者：把关闭按钮的颜色从 `--common-font-level3` 换成
+   `--common-iconfont-ActiveColor`**（浅色 `#7c7c7c` / 深色 `#d4d1cd`），并保证它在
+   两个主题下对浅底、深底都可读。
+3. **或者：给 `.tos-dialog-menu.micro` 一个自己的背景色。** 现在「看不看得见」这件事
+   取决于应用页面在那一格里画了什么 —— 对第三方应用来说不可控。
+
+## 5. 本包的绕过（平台修复后可删）
+
+`build.py` 的 `LOADER`：入口页自己画的那条 41px 标题栏**跟随桌面主题取色**，不再是
+写死的白底深字。
+
+- 父文档同源且无 `sandbox`，直接读它的 `data-theme`，并取
+  `--main-bg-color` / `--dialog-title-color` / `--common-line-level1` 的**计算值**套到
+  标题栏上：深色主题下标题栏就是平台自己的 `#0f1112`，`白 45%` 的 `×` 自然可见。
+- `MutationObserver` 监听父文档的 `data-theme`，窗口开着时切换主题也跟着变。
+- 万一父文档读不到（换域名、将来加了沙箱），回落到 `prefers-color-scheme` 加平台公布的
+  两套取值，不会退化成「白底白叉」。
+- 只**读**父文档，不改它的任何 DOM/CSS。
+
+平台修好第 1 或第 2 条之后，这段 JS 可以删掉，标题栏改回纯 CSS 即可。
+`tools/verify_deb.py` 现有 5 条断言绑定这段（`data-theme`、三个变量名、
+`attributeFilter: ["data-theme"]`、`prefers-color-scheme`、不得回到写死白底）。

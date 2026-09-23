@@ -250,28 +250,42 @@ LOADER = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>迅雷</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%%; overflow: hidden; background: #fff; }
-
-  /* TOS draws NO title bar for `type: "iframe"` applications. The desktop
+  /* TOS 7 draws no title bar for `type: "iframe"` applications. The desktop
      overlays a 40px "micro" menu (.tos-dialog-menu.micro) across the top of
      the window instead: it carries the drag handle plus the help / minimise /
      maximise / close buttons, and it swallows the pointer events for that
      whole strip. The Xunlei SPA puts its own toolbar in exactly that strip,
      so its 新建任务 button sat under the desktop's close button and could not
      be pressed. Nothing is reserved for the application, so the application
-     reserves it: this bar is the window's title bar, styled after the native
+     reserves it: this bar is the window title bar, styled after the native
      .tos-dialog-header (40px tall, 16px inset, 24px icon, 10px gap) and made
-     41px tall to clear that 40px menu plus its 1px bottom border. */
+     41px tall to clear that 40px menu plus its 1px bottom border.
+
+     The bar carries the desktop's own colours because of how the desktop
+     paints its four buttons. Help, minimise and maximise are grey SVG images
+     that read well on any background; the close button is a font glyph
+     coloured with var(--common-font-level3), which TOS resolves to a dark
+     grey in the light theme and to white at 45 percent opacity in the dark
+     theme. Over a light strip that white glyph is invisible, which is why the
+     close button only appeared once the pointer hovered it and the platform
+     painted it red. The script at the bottom of this page copies the
+     desktop's theme and its window colours onto this bar, so the glyph is
+     legible in both themes. */
+  :root { --bar-bg: #fff; --bar-fg: #0f1112; --bar-line: #f2f3f5; }
+  html[data-theme="dark"] { --bar-bg: #0f1112; --bar-fg: #fff; --bar-line: #272e3b; }
+
+  html, body { margin: 0; padding: 0; height: 100%%; overflow: hidden; background: var(--bar-bg); }
+
   #bar {
     height: 41px; box-sizing: border-box; display: flex; align-items: center;
-    padding-left: 16px; background: #fff; border-bottom: 1px solid rgba(0, 0, 0, .06);
+    padding-left: 16px; background: var(--bar-bg); border-bottom: 1px solid var(--bar-line);
     font: 700 14px/41px system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-    color: #27313f; user-select: none; -webkit-user-select: none;
+    color: var(--bar-fg); user-select: none; -webkit-user-select: none;
   }
   #bar img { width: 24px; height: 24px; display: block; }
   #bar span { margin-left: 10px; }
 
-  #app { display: block; border: 0; width: 100%%; height: calc(100%% - 41px); }
+  #app { display: block; border: 0; width: 100%%; height: calc(100%% - 41px); background: #fff; }
 </style>
 </head>
 <body>
@@ -280,6 +294,59 @@ LOADER = """<!DOCTYPE html>
      loads inside the application window, plus the title bar described above. -->
 <div id="bar"><img src="./icon.svg" alt="" /><span>迅雷</span></div>
 <iframe id="app" src="./app/" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+<script>
+(function () {
+  var root = document.documentElement;
+  var LIGHT = { bg: "#fff", fg: "#0f1112", line: "#f2f3f5" };
+  var DARK = { bg: "#0f1112", fg: "#fff", line: "#272e3b" };
+
+  function sync() {
+    var theme = null;
+    var cs = null;
+    // The desktop is same-origin with this page and does not sandbox the
+    // application iframe, so its theme attribute and its resolved window
+    // colours can be read straight off the parent document. If that ever
+    // stops being true the palette falls back to the values the desktop
+    // publishes for the two themes.
+    try {
+      var up = window.parent;
+      if (up && up !== window && up.document && up.document.documentElement) {
+        theme = up.document.documentElement.getAttribute("data-theme");
+        cs = up.getComputedStyle(up.document.documentElement);
+      }
+    } catch (err) { theme = null; cs = null; }
+
+    if (theme) { root.setAttribute("data-theme", theme); }
+    else { root.removeAttribute("data-theme"); }
+
+    var dark = theme === "dark";
+    if (!theme && window.matchMedia) {
+      dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+
+    var base = dark ? DARK : LIGHT;
+    var bg = base.bg;
+    var fg = base.fg;
+    var line = base.line;
+    if (cs) {
+      bg = String(cs.getPropertyValue("--main-bg-color") || "").trim() || bg;
+      fg = String(cs.getPropertyValue("--dialog-title-color") || "").trim() || fg;
+      line = String(cs.getPropertyValue("--common-line-level1") || "").trim() || line;
+    }
+    root.style.setProperty("--bar-bg", bg);
+    root.style.setProperty("--bar-fg", fg);
+    root.style.setProperty("--bar-line", line);
+  }
+
+  sync();
+  // Follow a theme change made while the window stays open.
+  try {
+    new MutationObserver(sync).observe(window.parent.document.documentElement, {
+      attributes: true, attributeFilter: ["data-theme"]
+    });
+  } catch (err) {}
+})();
+</script>
 </body>
 </html>
 """

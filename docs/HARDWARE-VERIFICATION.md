@@ -286,3 +286,81 @@ tmacltool modify /Volume1 "user:le3gold-xunlei:allow:r-x:--"
 
 清理：探针目录 `/Volume1/XunLeiTest`、`/Volume1/XunLeiTest2` 已删除；`/Volume10` 上的
 实验 ACE 已 `clear` 干净。
+
+---
+
+## 关键发现八：iframe 窗口的关闭按钮 `×` 在深色主题下不可见
+
+真机（TOS 7，深色主题：`html[data-theme=dark]`）打开应用窗口后，右上角只有
+`?` / `−` / `□` 三个按钮，`×` 的位置是空的；鼠标浮上去才出现（此时平台把底色涂成
+`#ff383c` 红、图标转白）。原因是平台四个按钮里只有关闭按钮没有 `background-image`：
+
+| 按钮 | 图标来源 | 颜色 |
+|---|---|---|
+| `?` 帮助 | `img/button_help.svg` | 写死 `#7C7C7C` |
+| `−` 最小化 | `img/button_minimize.svg` | 写死 `#7C7C7C` |
+| `□` 最大化 | `img/button_maximize.svg` | 写死 `#7C7C7C` |
+| `×` 关闭 | 字体图标 `iconReject` | `var(--common-font-level3)` |
+
+`--common-font-level3` 在深色主题下是 `hsla(0,0%,100%,0.45)`（白 45%），是给深色标题栏
+准备的；而那条 40px 覆盖层自己没有背景色，背景由应用页面提供。应用是浅色的，于是白叉
+压在白底上。平台自带的 `img/button_close.525215ef.svg`（`fill="#7C7C7C"`）存在但标题栏
+没有引用。
+
+完整取证与平台修复建议见 `docs/PLATFORM-DEFECT.md` 的缺陷 2。
+
+**本包的处理**：入口页的 41px 标题栏改为跟随桌面主题取色（读父文档的 `data-theme`
+与 `--main-bg-color` / `--dialog-title-color` / `--common-line-level1` 计算值），
+深色主题下标题栏就是 `#0f1112`，白叉可见；并挂 `MutationObserver`
+跟随运行中的主题切换。已验证同源（`iframeUrl = window.origin`，无 `sandbox` 属性），
+父文档可读。平台 nginx 实际下发的 `index.html` 含全部标记（4,828 字节）。
+
+## 关键发现九：引擎会把应用自己的状态目录列成一个「磁盘」
+
+「添加链接 -> 选择下载目录」对话框里出现三项：
+
+| 界面上显示 | 真实路径 | 所在磁盘 |
+|---|---|---|
+| 默认下载目录 -> `download` | `/Volume1/XunLeiPlus/download/` | 数据卷（290 GB 可用） |
+| 全部磁盘目录 -> `XunLeiPlus` -> `download` | `/Volume1/XunLeiPlus/download/` | 数据卷 |
+| 全部磁盘目录 -> `le3gold-xunlei` | `/var/lib/le3gold-xunlei/` | **系统盘 `/dev/md9`：7.5 GB，仅剩 3.4 GB** |
+
+第三项是应用自己的状态目录（`ConfigPath` = `PluginPATH` = 工作目录），引擎把它连同它的
+`download` 子目录一起当成第二个下载根上报：
+
+```
+set dlInfo:[
+  {"path":"/Volume1/XunLeiPlus/download/","is_root_path":false},
+  {"path":"/Volume1/XunLeiPlus/","is_root_path":true},
+  {"path":"/var/lib/le3gold-xunlei/","is_root_path":true}]
+```
+
+前端的 `downloadPathPassedByFactory()` 会过滤掉 `is_root_path` 的项，所以树根只是树根；
+**真正能被选中当下载目标的是 `is_root_path:false` 的两项**，其中
+`/var/lib/le3gold-xunlei/download/` 就在系统盘上。
+
+### 已排除的原因
+
+| 怀疑对象 | 试验 | 结论 |
+|---|---|---|
+| `DownloadPATHs`（引擎里唯一带 `env:` 标记的下载路径变量，冒号分隔） | 追加 `DownloadPATHs=/Volume1/XunLeiPlus/download/` 后重启 | dlInfo 三项不变，**不是它** |
+| 是否是一个挂载点 | `grep ' /var/lib' /proc/mounts` | 不是；`/` 才是挂载点 |
+| `PluginPATH` / `ConfigPath` / 工作目录 / `HOME` | 四个一起指向共享目录后重启 | 引擎起不来（launcher 依赖 `ConfigPath`/`PluginPATH` 定位引擎二进制），dlInfo 采不到，未定位到可用开关 |
+
+结论：这条根路径是引擎按「自己能用的存储位置」推出来的，没有对外暴露的开关
+（引擎里 `download_path.GetDiskMountPaths` / `disk.ListMount`，且 `DownloadPATH` 是
+**单数**、`DownloadPATHs` 是引擎保留的复数形式）。
+
+### 本包的处理
+
+`assets/bin/app.in` 步骤 2c：共享目录可写时，把 `${DATA_DIR}/download` 换成指向
+`/Volume1/<共享文件夹>/download` 的**符号链接**。这样即使有人在选择框里挑中
+「`le3gold-xunlei` -> `download`」，文件也落在数据卷上，不会写进系统盘。
+
+- 只在共享目录确实是下载目标时才建链接；回退分支里 `${DATA_DIR}/download` 本身就是
+  下载目标，保持真实目录。
+- 只替换自己的链接或**空**目录，绝不删除引擎已经写进去的文件。
+- 实测：装包后 `/var/lib/le3gold-xunlei/download -> /Volume1/XunLeiPlus/download`，
+  服务 `active`，引擎照常上报 dlInfo，`/le3gold-xunlei/app/` 返回 200。
+- 入口脚本日志会打印一行：`app-directory download root: /var/lib/le3gold-xunlei/download
+  -> /Volume1/XunLeiPlus/download`。

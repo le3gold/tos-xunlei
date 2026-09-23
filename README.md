@@ -38,7 +38,7 @@ python build.py
   - `out/le3gold-xunlei_x86_64.deb.sha256`
 - 构建结束会自动运行 `tools/verify_deb.py`：它独立解析 `ar` 与两个 tar，
   对包结构、`config.ini`、14 种语言文案、systemd 单元、nginx 片段、
-  生命周期脚本、二进制 sha256 做 222 项断言。**验证不通过则构建失败。**
+  生命周期脚本、二进制 sha256 做 241 项断言。**验证不通过则构建失败。**
 
 ## 安装
 
@@ -90,7 +90,7 @@ systemctl status le3gold-xunlei
 | `/usr/local/le3gold-xunlei/webui/**` | `postinst` 解开 `webui.bz2` | iframe 小窗的加载页（`index.html` 里嵌 `<iframe src="./app/">`） | 删除 |
 | `/var/lib/le3gold-xunlei/bin/` | 首次启动 | 启动器 unix socket 目录 | 删除 |
 | `/var/lib/le3gold-xunlei/.drive/**` | 首次启动 | 登录态、下载进度、引擎自更新后的副本 | 删除 |
-| `/var/lib/le3gold-xunlei/download/` | `postinst` / 首次启动 | 下载回退目录（共享目录不可写时使用） | 删除 |
+| `/var/lib/le3gold-xunlei/download` | 首次启动 | 指向共享目录 `download/` 的**符号链接**（引擎把这个位置当成第二个下载根，见下文第 5 点）；共享目录不可写时才是真实的回退目录 | 删除链接（不动目标） |
 | `/var/lib/le3gold-xunlei/runtime/**` | `postinst`，每次安装/升级刷新 | 运行用户可读的**可执行文件副本**（入口脚本 + 启动器 + 引擎） | 删除 |
 | `/var/lib/le3gold-xunlei/{CidStore.DB,seq_id,setting.cfg}` | 首次启动 | 引擎写在其工作目录下的状态文件 | 删除 |
 | `/var/lib/le3gold-xunlei/pan-cli.log` | 首次启动 | 引擎日志（10MB 轮转） | 删除 |
@@ -194,6 +194,29 @@ isIframe || ...` 一旦为真，整块 header（`.tos-dialog-header`）就不渲
 > 这是平台行为所致，不是本应用的特殊做法：所有 `type: "iframe"` 的应用都躲不开这 40px，
 > 只是各自用各自的方式让出来。
 
+这条标题栏**跟随桌面主题取色**：`×` 是平台唯一个用字体图标上色的按钮
+（颜色取 `--common-font-level3`，深色主题下是「白 45%」），压在写死的白底标题栏上就会
+隐身、只有 hover 变红才看得见。入口页读父文档（同源、无 `sandbox`）的 `data-theme` 与
+`--main-bg-color` / `--dialog-title-color` / `--common-line-level1` 计算值来上色，
+并用 `MutationObserver` 跟随运行中的主题切换；读不到时回落 `prefers-color-scheme`。
+平台侧的问题与建议见 `docs/PLATFORM-DEFECT.md` 的缺陷 2。
+
+
+### 5. 下载目录：引擎自带的第二项在系统盘上
+
+「添加链接 -> 选择下载目录」里列出的三项，对应：
+
+| 界面显示 | 真实路径 | 磁盘 |
+|---|---|---|
+| 默认下载目录 -> `download` | `/Volume1/XunLeiPlus/download/` | 数据卷 |
+| 全部磁盘目录 -> `XunLeiPlus` -> `download` | `/Volume1/XunLeiPlus/download/` | 数据卷 |
+| 全部磁盘目录 -> `le3gold-xunlei` | `/var/lib/le3gold-xunlei/`（**系统盘**） | `/dev/md9`，7.5 GB |
+
+第三项是应用自己的状态目录。引擎按「自己能用的存储位置」把它推成第二个下载根，
+没有对外开关（`DownloadPATHs` 已验证无效）。本包因此把 `${DATA_DIR}/download`
+做成指向共享目录的符号链接：选中它也只会写到数据卷上。详见
+`docs/HARDWARE-VERIFICATION.md` 关键发现九。
+
 ## 与《TOS 7 应用开发指南》的符合性
 
 | 条目 | 做法 |
@@ -206,7 +229,7 @@ isIframe || ...` 一旦为真，整块 header（`.tos-dialog-header`）就不渲
 | 10.4 | 程序与配置对服务只读，只有数据/日志目录可写；`ProtectSystem=strict` + `ReadWritePaths` |
 | 10.6 | 共享文件夹用 `ter_share_add -owner` 创建并按一方应用方式补 Rich ACL；另因平台缺陷补卷根穿越权限（见上文第 2 点，`docs/PLATFORM-DEFECT.md`） |
 | 10.7 / 12.1 | 包内布局与官方单包模板一致（`/usr/local/<id>`）；平台会把文件迁移到 `/Volume*/@apps/<id>`，本包为此提供运行时副本（见上文第 3 点） |
-| 12.9.6 | 运行期文件清单见上 |
+| 12.9.6 | 运行期文件清单见上；${DATA_DIR}/download 是符号链接而非目录，卸载时 `rm -rf` 只删链接、不跟随 |
 | 发布 | Release 资源名用推荐格式 `<应用ID>_<平台>.deb`（2026-09-23 起平台只按扩展名判定包型，命名不再是强制项）；版本以 `config.ini.version` 为准，**Release tag 不参与版本判定** |
 | nginx | 只用平台已定义的变量（TOS 的 nginx **没有** `$connection_upgrade`，故用字面量 `Connection upgrade`） |
 

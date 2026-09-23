@@ -346,6 +346,30 @@ def verify(deb_store, cfg, verbose=True):
     c.ok("icon.svg" in inner,
          "the title bar icon must ship inside webui.bz2; /images/... in"
          " config.ini is not reachable from inside the window")
+    # The desktop paints its own help / minimise / maximise / close buttons on
+    # top of that strip. Three of them are grey SVG images, but the close
+    # button is a font glyph coloured with var(--common-font-level3), which is
+    # a dark grey in the light theme and white at 45 percent opacity in the
+    # dark theme: over a permanently white strip it disappears until hovered.
+    # The bar therefore has to follow the desktop's theme.
+    c.ok("data-theme" in html and '[data-theme="dark"]' in html,
+         "the title bar must have a dark palette keyed off the desktop's"
+         " data-theme, because the desktop's close glyph turns white in the"
+         " dark theme and would be invisible on a white bar")
+    c.ok("--main-bg-color" in html and "--dialog-title-color" in html
+         and "--common-line-level1" in html,
+         "the title bar must read the desktop's own window colours"
+         " (--main-bg-color / --dialog-title-color / --common-line-level1)"
+         " instead of hard-coding a palette")
+    c.ok('attributeFilter: ["data-theme"]' in html,
+         "the title bar must follow a theme change made while the window is"
+         " open (MutationObserver on the desktop's data-theme)")
+    c.ok("prefers-color-scheme" in html,
+         "the title bar needs a fallback palette for when the parent document"
+         " is not readable")
+    c.ok("#27313f" not in html and "background: #fff; border-bottom" not in html,
+         "the title bar must not go back to a fixed white background and a"
+         " fixed dark text colour")
 
     # ---- lifecycle scripts
     scripts = {}
@@ -400,6 +424,24 @@ def verify(deb_store, cfg, verbose=True):
          "entry point must probe the shared folder and report it unwritable")
     c.ok("${DATA_DIR}/download" in e,
          "entry point needs a writable fallback location for downloads")
+    # The engine offers <ConfigPath>/download as a second download root and
+    # ConfigPath is ${DATA_DIR}, i.e. the system disk. That entry must resolve
+    # to the shared folder, never to /dev/md9.
+    c.ok('ln -sfn "${DOWNLOAD_PATH}" "${DATA_DIR}/download"' in e,
+         "the engine's own download root (${DATA_DIR}/download, on the system"
+         " disk) must be a symlink to the shared folder so a task sent there"
+         " cannot fill the system disk")
+    c.ok('[ "${DOWNLOAD_PATH}" = "${SHARE_PATH}/download" ]' in e,
+         "that symlink may only be made when the shared folder is the download"
+         " target; in the fallback ${DATA_DIR}/download is the target itself")
+    c.ok('[ -h "${DATA_DIR}/download" ]' in e and
+         'rmdir "${DATA_DIR}/download"' in e,
+         "the entry point must only replace an empty directory or its own link,"
+         " never delete an existing download tree")
+    c.ok('mkdir -p "${DATA_DIR}/bin" "${DATA_DIR}/.drive" "${DATA_DIR}/download"'
+         not in e,
+         "the entry point must not create ${DATA_DIR}/download unconditionally;"
+         " that path belongs to the shared folder now")
     prerm = scripts["prerm"]
     c.ok("systemctl stop" in prerm, "prerm must stop the service")
 
