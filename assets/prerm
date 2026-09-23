@@ -1,0 +1,25 @@
+#!/bin/bash
+# prerm - stop on upgrade, stop+disable on remove.
+set -e
+
+APP_ID="@@APP_ID@@"
+LOG="/var/log/${APP_ID}-maint.log"
+echo "$(date '+%F %T') prerm $*" >> "$LOG" 2>/dev/null || true
+
+systemctl stop "${APP_ID}.service" 2>/dev/null || true
+
+case "$1" in
+  remove|deconfigure)
+    systemctl disable "${APP_ID}.service" 2>/dev/null || true
+    ;;
+  upgrade)
+    # Only stop. The new postinst re-enables; never leave the app disabled
+    # after an upgrade.
+    ;;
+esac
+
+# Reap stragglers owned by the service user (the engine forks a child).
+pkill -u "${APP_ID}" 2>/dev/null || true
+sleep 1
+
+exit 0

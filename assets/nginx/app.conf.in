@@ -1,0 +1,32 @@
+# TOS 7 Deb application nginx snippet  -> /etc/nginx/conf.d/@@APP_ID@@.conf
+#
+# Two routes cooperate:
+#   /@@APP_ID@@/       static WebUI served by the platform from webui.bz2
+#                      (the loader page that mounts the app window iframe)
+#   /@@APP_ID@@/app/   the Xunlei engine itself, reverse proxied here
+#
+# The `^~` modifier keeps the platform's regex locations (^/v2/, ^/tos ...)
+# from stealing the engine's assets. The engine serves its single page app
+# at its own root and every URL inside it is relative, so stripping the
+# /app/ prefix keeps assets and API calls inside the application window.
+# No server{} block and no port of our own: the platform nginx owns both.
+location ^~ /@@APP_ID@@/app/ {
+    proxy_pass http://127.0.0.1:@@WEBUI_PORT@@/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host:$server_port;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Real-PORT $remote_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection upgrade;
+
+    # The engine authenticates its own API and keeps sessions in cookies.
+    proxy_set_header Cookie $http_cookie;
+
+    # Downloads can be large and the UI keeps a long lived event stream.
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    client_max_body_size 0;
+}

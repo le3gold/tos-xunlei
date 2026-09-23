@@ -97,3 +97,85 @@ DriveListen=0.0.0.0:21064 DrivePublicPort=21604 drive_loglevel=info \
 
 测试实例（pid 1491479/1491490）已 kill。`/Volume1/xunlei-353-test/` 仍保留，
 用于下一步验证 deb 的真实布局；不再需要时可直接 `rm -rf`。
+
+---
+
+# 第二阶段：成品 deb 真机验证（1.0.0-1）
+
+## 安装与运行
+
+| 检查项 | 结果 |
+|---|---|
+| `useradd -r -M -s /usr/sbin/nologin le3gold-xunlei`（平台本应自己做）+ `dpkg -i` | 无报错 |
+| `systemctl is-enabled` / `is-active` | `enabled` / `active` |
+| 服务进程身份 | `le3gold-xunlei`（uid 997，**非 root**） |
+| 引擎监听 | `18889`（WebUI）、`18890` |
+| `curl http://127.0.0.1:18889/` | 200，SPA 标题「迅雷下载」 |
+| `/le3gold-xunlei/app/`（经平台 nginx，8181） | 200 |
+| `/le3gold-xunlei/app/assets/index-fecd76c5.js` | 200，1,527,665 字节 |
+| `POST /le3gold-xunlei/app/device/info/watch` | **403 + JSON 鉴权错误**（证明请求打到了迅雷 API，而不是 404） |
+| `nginx -t` | OK |
+| 引擎日志中的平台标记 | 「铁威马专享」9 次、`terramaster` 43 次 |
+| 覆盖安装（再 `dpkg -i` 一次） | 正常，修复逻辑幂等 |
+
+`/le3gold-xunlei/`（iframe 加载页）在手动安装下返回 404 —— 因为该实例没有在
+TOS 的 `config.ini` 注册，平台不会把 `webui.bz2` 挂到该路径下。真实应用中心安装
+注册后由平台提供。
+
+## 发现四：/etc/os-release 被旧版迅雷破坏（导致引擎 panic）
+
+3.23.7 引擎在识别平台时会读 `/etc/os-release`，失败即 `panic: platform not suport`。
+
+旧版迅雷应用（`xunleipan 2.9.1`）把 `/etc/os-release` 换成指向
+`/Volume1/@apps/xunleipan/nginx/os-release` 的符号链接（该文件对普通用户不可读），
+停止服务时还会直接 `unlink` 它。旧版迅雷以 uid 0 运行，所以从未暴露这个问题。
+
+验证方式：
+
+- 以 root 运行引擎 → 正常；
+- 以应用用户运行引擎 → panic；
+- 把符号链接换成普通 `0644` 文件 → 正常。
+
+`bind --bind` 挂载、SMACK 之类的绕过都无效（该文件受 TOS 访问控制保护）。
+本包在 `postinst` 里做幂等修复（仅在缺失/不可读时动作），见 README。
+
+> 这同时是一个**平台侧问题**：旧版迅雷退出后 `/etc/os-release` 处于损坏状态，
+> 会影响所有以非 root 运行、且需要读该文件的应用。
+
+## 发现五：/Volume1 的 Rich ACL 对非 root 用户全线拒绝
+
+`/Volume1` 以 `tmacl` 选项挂载（btrfs），由内核模块 `tmacl_vfs`
+（`/lib/modules/6.12.63+/kernel/fs/tmacl_vfs.ko.xz`，"TerraMaster Rich ACL Support"）
+执行 ACL。规则存在 `system.tm_acl` xattr 中，用 `tmacltool` 管理。
+
+在测试机上实测：
+
+| 试验 | 结果 |
+|---|---|
+| 非 root 用户写 `/Volume1/<share>/`（目录属主就是自己、权限 rwx） | `EACCES` |
+| 非 root 用户写 `/Volume1/@zlog`（777） | `EACCES` |
+| 给该用户 `tmacltool modify ... user:<user>:allow:rwxpdDaARWc:fd` 后再写 | 仍 `EACCES` |
+| `tmacltool get-perm <path> <uid>` | `max_permission: rwxpdDaARWc--`（**工具认为已授权**） |
+| TOS 自带应用运行用户（`qbittorrent`、`transmission`、`webserver`、`PHP80`）按同样方式测试 | 全部 `EACCES` |
+| root 写同一目录 | OK |
+
+即：**该机上任何非 root 用户都写不进 `/Volume1`，与 ACL 是否授权无关**。
+TOS 自带 qBittorrent 的目录（`/Volume1/qBittorrent/qBittorrent/config`）是 9 月 20 日
+由该应用用户创建的，说明这条路径**曾经可用**；`/Volume1/*` 下共享目录的
+`#recycle` 时间为 9 月 22 日 12:07，疑似与一次共享/ACL 迁移有关。
+
+因此本包采取的策略是：
+
+1. 严格按指南 10.6 与一方应用的方式授权（`ter_share_add -owner` + `tmacltool modify`）；
+2. 启动时**实测**共享目录可写性，不可写则回退到 `/var/lib/le3gold-xunlei/download`
+   并输出明确告警，保证下载功能不因此整体失效。
+
+> 建议内部跟进：确认 TOS 7 在共享目录重建/迁移后是否会丢失 app 用户的 Rich ACL，
+> 以及为什么 `tmacltool` 报已授权而内核仍拒绝。
+
+## 清理状态
+
+- 生产环境的迅雷 2.9.1 未被改动（仍占 21063/21603）。
+- `/etc/os-release` 目前是 `0644` 普通文件（本包修复的结果）。
+- 临时探针 `/tmp/tr-root`、`/tmp/xl-*`、`/tmp/le3gold-xunlei_x86_64.deb` 已删除。
+- 早期测试实例目录 `/Volume1/xunlei-353-test/` 仍在，确认无用后可 `rm -rf`。

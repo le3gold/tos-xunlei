@@ -1,131 +1,185 @@
-# tos-xunlei — 迅雷 for TOS 7 应用中心
+# 迅雷 for TOS 7 应用中心
 
-**状态：调研完成，等待方向决策。尚未开始打包，仓库内不含任何迅雷二进制。**
+把迅雷官方的下载引擎 **3.23.7** 封装成 TOS 7 的应用（`deb` + `iframe` 小窗），
+在应用中心里点开就是**迅雷官方 WebUI**，以独立小窗形式打开。
 
-## 一句话结论
+- 调研过程与结论：`docs/RECON.md`
+- 真机实测记录：`docs/HARDWARE-VERIFICATION.md`
+- 上游来源与校验值：包内 `/usr/local/<应用ID>/PROVENANCE.md`
 
-技术上有明确可行的路径，但**迅雷没有官方 deb**——公开可下载的只有面向群晖的 SPK。
-把其中的迅雷引擎重新封装成 TOS deb 在工程上完全做得到（引擎是标准 Linux ELF，
-不需要 root），但**会踩到 TOS 7 上架审核的 V6 红线**：包内二进制必须有公开可审计的来源。
-所以本项目应按"厂商渠道应用"定位，而不是"第三方提审应用"。
+## 产物一览
 
-## 已实测的事实
-
-| 项 | 结果 |
+| 项 | 值 |
 |---|---|
-| 迅雷官方 NAS 页面 | `http://nas.xunlei.com/`，合作伙伴列表里**已经包含 TerraMaster** |
-| 官方 CDN | `https://down.sandai.net/nas/` |
-| 页面 JS 里仅有的两个包 | `nasxunlei-DSM6-x86_64.spk`、`nasxunlei-DSM7-x86_64.spk` |
-| 猜测过的 deb 路径 | `nas/xunlei_x86_64.deb`、`nas/nasxunlei-TOS-x86_64.deb`、`nas/nasxunlei-TerraMaster-x86_64.deb` 等**全部不存在** |
-| DSM7 SPK 大小 / 校验 | 27,084,800 字节 |
-| 引擎版本 | `bin/bin/version` = **3.23.5**，`version_code` = 3023005 |
-| SPK `INFO` 版本 | `3.23.5-0814080017` |
+| 应用 ID | `le3gold-xunlei` |
+| 应用名称 | 迅雷 |
+| 版本 | `1.0.0-1`（发布 tag `v1.0.0`） |
+| 平台 / 架构 | `x86_64` / `amd64` |
+| 打开方式 | **iframe 小窗**（`type: iframe`、`path: /le3gold-xunlei/`、可缩放、可最大化/最小化） |
+| 发布包名 | `le3gold-xunlei_x86_64.deb`（**文件名不带版本号**，版本由 tag 决定） |
+| 下载引擎 | `xunlei-pan-cli 3.23.7`（上游 linux 构建） |
+| 启动器 | `xunlei-pan-cli-launcher.amd64` |
+| 端口 | `18889`（引擎 WebUI，本机/内网）、`18890`（对外映射端口） |
+| 共享文件夹 | `XunLeiPlus`，下载落到 `XunLeiPlus/download/` |
+| 运行用户 | 平台按 `config.ini.user` 创建的 `le3gold-xunlei`（非 root） |
 
-### 载荷（SPK 内 `package.tgz`）结构
+## 构建
 
-```
-bin/bin/version                          # 3.23.5
-bin/bin/version_code                     # 3023005
-bin/bin/xunlei-pan-cli-launcher.amd64    19.7 MB  启动器
-bin/bin/xunlei-pan-cli.3.23.5.amd64      62.8 MB  下载引擎
-bin/xunlei-pan-cli.sh                    # 3 行壳脚本
-ui/index.cgi                             17.5 MB  官方 WebUI（Go，CGI 程序）
-ui/Main.js ui/layout.html ui/style.css   # WebUI 静态资源
-ui/images/* ui/texts/{chs,enu}/*
+```bash
+python build.py
 ```
 
-### 关键结论：引擎可以非 root 运行
+- 首次构建会联网下载引擎（迅雷官方 CDN）与启动器（迅雷官方 SPK），
+  之后使用 `build/` 缓存。
+- 输出：
+  - `out/le3gold-xunlei_1.0.0-1_amd64.deb` — 本地安装用
+  - `out/le3gold-xunlei_x86_64.deb` — **提交应用中心用**（文件名不带版本）
+  - `out/le3gold-xunlei_x86_64.deb.sha256`
+- 构建结束会自动运行 `tools/verify_deb.py`：它独立解析 `ar` 与两个 tar，
+  对包结构、`config.ini`、14 种语言文案、systemd 单元、nginx 片段、
+  生命周期脚本、二进制 sha256 做 222 项断言。**验证不通过则构建失败。**
 
-用自写的 ELF 解析器读了动态段：
+## 安装
 
-| 二进制 | 架构 | NEEDED | glibc 要求 |
+应用中心安装时，平台会根据 `config.ini.user` 创建运行用户并创建共享文件夹。
+
+手动 `dpkg -i` 验证（平台不参与，需自己补一步建用户）：
+
+```bash
+sudo useradd -r -M -s /usr/sbin/nologin le3gold-xunlei
+sudo dpkg -i le3gold-xunlei_x86_64.deb
+systemctl status le3gold-xunlei
+```
+
+打开：`http://<NAS>:8181/le3gold-xunlei/`
+
+## 提交应用中心需要的信息
+
+| 字段 | 值 |
+|---|---|
+| 应用 ID | `le3gold-xunlei` |
+| 仓库地址 | https://github.com/le3gold/tos-xunlei |
+| 版本 | `1.0.0`（tag `v1.0.0`） |
+| Release 资源 | `le3gold-xunlei_x86_64.deb`（+ `.sha256`） |
+| 发布者 | `le3gold` |
+
+平台按 `<应用ID>_<平台>.deb` 从仓库 Release 取包，所以资源名必须正好是
+`le3gold-xunlei_x86_64.deb`，不带版本号。
+
+## 权限声明（指南 10.8）
+
+| 权限 | 用途 |
+|---|---|
+| 网络：端口 `18889` | 迅雷引擎在本机/内网提供 WebUI，由平台 nginx 反向代理 |
+| 网络：端口 `18890` | 迅雷引擎对外通报的公开端口（P2P/加速通道） |
+| 网络：出站连接 | 登录迅雷账号、拉取云端配置、下载任务数据 |
+| 文件系统：`/var/lib/le3gold-xunlei` | 引擎运行态数据、日志、登录态、引擎自更新副本 |
+| 文件系统：`/usr/local/le3gold-xunlei` | 程序本体（服务只读） |
+| 共享文件夹：`XunLeiPlus` | 用户可见的下载内容，SMB/NFS 可取 |
+| 用户：`le3gold-xunlei`（系统用户） | 以非 root 身份隔离运行服务 |
+| 系统目录写入 | **无**（唯一例外见下方 `/etc/os-release` 修复） |
+| root 权限 | **无**（`User=root` 被审核红线禁止，本包不使用） |
+
+## 运行期文件清单（指南 12.9.6，必填）
+
+| 路径 | 何时创建 | 用途 | 卸载时 |
 |---|---|---|---|
-| `xunlei-pan-cli-launcher.amd64` | x86-64 | `libpthread`, `libc` | ≥ 2.3 |
-| `xunlei-pan-cli.3.23.5.amd64` | x86-64 | `libm`, `libdl`, `libstdc++`, `libpthread`, `libgcc_s`, `libc` | ≥ 2.17 |
-| `ui/index.cgi` | x86-64 | `libpthread`, `libc` | ≥ 2.3 |
+| `/usr/local/le3gold-xunlei/**` | 安装解包 | 程序、启动器、引擎、nginx 片段、systemd 单元、`webui.bz2`、`PROVENANCE.md` | 删除 |
+| `/usr/local/le3gold-xunlei/webui/**` | `postinst` 解开 `webui.bz2` | iframe 小窗的加载页（`index.html` 里嵌 `<iframe src="./app/">`） | 删除 |
+| `/var/lib/le3gold-xunlei/bin/` | 首次启动 | 启动器 unix socket 目录 | 删除 |
+| `/var/lib/le3gold-xunlei/.drive/**` | 首次启动 | 登录态、下载进度、引擎自更新后的副本 | 删除 |
+| `/var/lib/le3gold-xunlei/download/` | `postinst` / 首次启动 | 下载回退目录（共享目录不可写时使用） | 删除 |
+| `/var/lib/le3gold-xunlei/pan-cli.log` | 首次启动 | 引擎日志（10MB 轮转） | 删除 |
+| `/var/lib/le3gold-xunlei/pan-cli.pid`、`pan-cli.pid.child` | 首次启动 | 启动器与引擎 PID | 删除 |
+| `/Volume1/XunLeiPlus/download/**` | `postinst` | **用户数据**：下载完成的文件，SMB/NFS 可见 | **保留** |
+| `/etc/nginx/conf.d/le3gold-xunlei.conf` | `postinst` | 把 `/le3gold-xunlei/app/` 反代到 `127.0.0.1:18889` | 删除 |
+| `/etc/systemd/system/le3gold-xunlei.service` | `postinst` | 服务单元 | 删除 |
+| `/var/log/le3gold-xunlei-maint.log` | `postinst` | 生命周期脚本日志 | 删除 |
+| `/etc/os-release` | `postinst`，**仅当缺失或运行用户不可读时** | 修复被旧版迅雷破坏的发行版标识 | **不修改发行版内容**，见下节 |
 
-- **没有任何群晖专有 `.so` 依赖**，只有标准 glibc/libstdc++。TOS 7 是 glibc 2.35，满足。
-- SPK 的 `conf/privilege` 声明 `run-as: package`，即**在群晖上本来就是以非 root 的
-  `sc-pan-xunlei-com` 用户运行**。
-- `scripts/service-setup` 里那句注释 `I need root to bind to port 53` 是
-  **dnscrypt 模板的残留文本**（该 SPK 源自 `jedisct1/pan-xunlei-com` 的 dnscrypt
-  服务模板，`ui/index.conf` 的 keywords 还留着 dns/dnscrypt/doh/proxy）。
-  实际的 `service_prestart()` 里没有任何 53 端口操作。二进制里的 `[::1]:53` 只是
-  DNS 解析器默认值和内嵌的指纹库字符串。
+## 两处需要知道的行为
 
-结论：**TOS 侧不需要 root，不需要特权端口，符合指引第 10 章"禁止 User=root"。**
+### 1. `/etc/os-release` 修复
 
-## 启动方式（来自 SPK 的 `service-setup`）
+迅雷引擎在识别运行平台时会读 `/etc/os-release`，**读不到就直接 `panic: platform not suport`**。
 
+TOS 上旧版迅雷应用（`xunleipan 2.9.1`）把 `/etc/os-release` 换成了指向自己目录的符号链接
+（且停止服务时会直接 `unlink` 掉），该文件对普通用户不可读。旧版迅雷以 uid 0 运行所以没暴露，
+本包以非 root 运行就会踩到。
+
+`postinst` 的处理：
+
+- 文件不存在 → 用包内自带的 `os-release` 恢复一份 `0644`；
+- 文件存在但运行用户读不了 → 复制内容到临时文件、`chmod 0644` 后替换（**不动发行版内容**）；
+- 已经可读 → **完全不碰**。
+
+`bin/le3gold-xunlei` 启动时也会再检查一次并给出明确告警，可用
+`sudo dpkg-reconfigure le3gold-xunlei` 重跑修复。
+
+### 2. 共享文件夹权限与下载回退
+
+`/Volume*` 以 `tmacl` 选项挂载，由 TerraMaster 的 Rich ACL（内核模块 `tmacl_vfs`）管控：
+**非 root 用户默认无法在其中写入**，必须对该用户显式授权。本包按官方指南 10.6 与
+一方应用（qBittorrent / Transmission）完全一致的做法处理：
+
+```bash
+ter_share_add -name XunLeiPlus -owner le3gold-xunlei
+tmacltool modify /Volume1/XunLeiPlus "user:le3gold-xunlei:allow:rwxpdDaARWc:fd"
 ```
-DriveListen=unix://<pkgdest>/var/pan-xunlei-com.sock
-PLATFORM=群晖
-OS_VERSION="<platform> dsm <ver>"
-ConfigPath=<共享文件夹>
-DownloadPATH=<共享文件夹>/下载/
-HOME=<共享文件夹>/.drive
-bin/xunlei-pan-cli.sh -launcher_listen=unix://<pkgdest>/var/pan-xunlei-com-launcher.sock \
-                      --pid <pkgdest>/var/pan-xunlei-com.pid --logfile <pkgdest>/var/xxx.log
-```
 
-即：**引擎全部通过 Unix socket 通信**，不需要监听任何 TCP 端口。
+如果平台没有（或还没）授好权，`bin/le3gold-xunlei` 会**实测共享目录是否可写**：
+不可写时自动把下载目录回退到 `/var/lib/le3gold-xunlei/download` 并在日志里明确告警，
+而不是让每个任务都失败。
 
-## WebUI 怎么接进 TOS iframe 模式
+> 实测备注：测试机（TOS 7，内核 6.12.63）上即使是 TOS 自带应用的运行用户，
+> 也无法写入 `/Volume1` 下任何目录（含 777 目录），ACL 已授权的情况下依然 `EACCES`。
+> 这属于该机器的 ACL 层状态，不是本包引入的问题；本包因此必须带这个回退。
 
-官方 `ui/index.cgi` 是个 **CGI 程序**，靠 `REQUEST_METHOD` / `QUERY_STRING` 等
-环境变量工作，认证上依赖群晖的 `/usr/syno/synoman/webman/modules/authenticate.cgi`
-和 `/webman/login.cgi`。
+## 与《TOS 7 应用开发指南》的符合性
 
-业界已有成熟先例 `cnk3x/xunlei`（★2041，MIT）证明了怎么在非群晖 Linux 上跑它：
-用 Go 的 `net/http/cgi` 把 `index.cgi` 挂到自己的 HTTP 服务器上，并 mock 掉群晖环境：
+| 条目 | 做法 |
+|---|---|
+| 7 应用类型 | `iframe` 小窗：`type: iframe` + `path`，**未同时使用 `open_path`**（二者互斥） |
+| 8.3 iframe 要求 | `webui.bz2`（固定文件名、扁平归档、根目录有 `index.html`）+ `/usr/local/<id>/nginx/<id>.conf` |
+| 8.3 端口 | 使用 `18889/18890`，避开 22/80/443/8181/5050；引擎监听 `0.0.0.0`（非仅回环） |
+| 8.12 | iframe 应用**不使用** `PrivateTmp=true`（否则 `/var/api`、`/var/log` 悬空） |
+| 8.14 / 10.3 | `config.ini.user` = `le3gold-xunlei`，systemd `User=` 同名；生命周期脚本**不创建用户**；`User=root` 禁止 |
+| 10.4 | 程序与配置对服务只读，只有数据/日志目录可写；`ProtectSystem=strict` + `ReadWritePaths` |
+| 10.6 | 共享文件夹用 `ter_share_add -owner` 创建，并按一方应用方式补 Rich ACL |
+| 12.9.6 | 运行期文件清单见上 |
+| 发布 | Release 资源名 `<应用ID>_<平台>.deb`，不带版本号 |
+| nginx | 只用平台已定义的变量（TOS 的 nginx **没有** `$connection_upgrade`，故用字面量 `Connection upgrade`） |
 
-- `mockEnv()`：注入 `SYNOPLATFORM` / `SYNOPKG_PKGDEST` / `SYNOPKG_DSM_VERSION_*` /
-  `PLATFORM=群晖` / `OS_VERSION` / `ConfigPath` / `HOME` / `DownloadPATH`
-- `mockSyno()`：写一份假的 `/etc/synoinfo.conf`，并把 `authenticate.cgi` 换成一个
-  只输出 `admin` 的桩程序
-- `/webman/login.cgi` 返回假 `{"SynoToken":"...","result":"success","success":true}`
-- 路由 `/webman/3rdparty/pan-xunlei-com/index.cgi/` → CGI handler
+## 来源与审计链
 
-**映射到 TOS iframe 模式**（指引 8.3.1）：把上面那台 Go HTTP 服务器换成
-**Python 3.10 标准库写的 CGI 宿主**（TOS 7 预装 Python 3.10，deb 不允许依赖
-Node/Java/Go/PHP，用 Python 可以零额外依赖），让它监听指引要求的
-`/var/api/<app_id>.sock`（mode 0660）即可。
+包内 `PROVENANCE.md` 记录每个二进制的下载地址、大小、`sha256`（启动器额外含 `md5`）。
+构建脚本对缓存与下载结果逐字节校验，校验不过直接失败；`tools/verify_deb.py`
+再从成品 deb 里反向校验一次。
 
-这样 WebUI 就是**迅雷官方界面**，不是第三方重写的面板。
+上游：
 
-## 风险与待解问题
+- 引擎（迅雷官方 CDN，linux 构建）：`https://2rvk4e3gkdnl7u1kl0k.xbase.cloud/v1/file/pancli/amd64/xunlei-pan-cli.3.23.7.amd64`
+- 启动器（迅雷官方 SPK 内成员 `bin/bin/xunlei-pan-cli-launcher.amd64`）：`https://down.sandai.net/nas/nasxunlei-DSM7-x86_64.spk`
 
-1. **V6 审核红线（最大阻塞）**：包内二进制必须公开可审计来源。迅雷引擎是闭源
-   商业软件，从迅雷 CDN 下载——第三方提审必然被拒。
-2. **再分发授权**：迅雷引擎版权属于迅雷。TerraMaster 是官方合作伙伴，有既有渠道，
-   但没有授权就不能公开再分发。
-3. **群晖模拟很脆弱**：`/etc/synoinfo.conf`、`authenticate.cgi`、`login.cgi`、
-   `PLATFORM=群晖` 都是模拟出来的。TOS 侧要额外维护这层模拟；一旦迅雷换版本
-   可能失效。而 TOS 的 `/etc` 是禁止写入的（指引第 10 章），只能在应用私有目录里
-   构造等价路径，需要真机验证引擎是否真的读这些路径。
-4. **无法在本机构建验证**：本机没有 Linux 环境（无 dpkg-deb / Docker / WSL），
-   只能做静态分析与打包，**必须在 TOS 真机上做安装与运行验证**。
-5. **数据目录**：`ConfigPath` 与 `DownloadPATH` 需要落到用户可见的共享文件夹
-   （`config.ini` 的 `share_folders`），保证 SMB/NFS 能取到下载内容；`.drive`
-   里存的是登录态与下载进度，卸载脚本**绝不能删**。
+## 已知限制
 
-## 两条路
+1. **V6 审核红线（最大风险）**：包内二进制须有公开可审计来源。迅雷引擎是闭源商业软件，
+   第三方身份提审大概率被拒。本包应按**厂商渠道应用**定位。
+2. **再分发授权**：迅雷引擎版权属于迅雷，公开再分发需要授权。
+3. **共享目录 ACL 依赖平台**：见上文第 2 点，本包已做回退但首选仍是共享目录。
+4. **换版本要重新核对**：引擎是自更新的（会往 `.drive/bin/` 放新副本），
+   升级引擎版本后应重新跑 `build.py` 与真机验证。
 
-**A. 厂商渠道（推荐）**
-通过迅雷 NAS 合作渠道索取面向 TOS 的原生构建（或由 TerraMaster 以厂商身份在应用
-中心更新现有迅雷应用到 3.23.5）。优点：无 V6 问题、无群晖模拟层、可长期维护。
-公开渠道只有群晖 SPK，说明即便是飞牛的版本很可能也是社区重打包——
-详见 `xm0625/docker-xunlei-arm-fpk`（"飞牛arm版迅雷-docker版"）。
+## 成本最低的替代方案
 
-**B. 内部技术验证包**
-按上面设计封装一个 deb，**仅用于内网验证/给迅雷方做对接素材**，不进应用中心提审。
-技术上完全可行，本文档已给出全部要点。
+请迅雷把 `terramaster` 加进
+`https://2rvk4e3gkdnl7u1kl0k.xbase.cloud/v1/file/pancli/versions.info.amd64`
+的 filter（当前是 `match: ["platform","in","synology","linux"]`）。
+这样**所有已装 2.9.1 的 TOS 设备会自动升级到 3.23.7，零打包工作量**，
+比重新打包更划算，也顺带解决长期维护。
 
 ## 参考
 
-- 迅雷 NAS 官方页：http://nas.xunlei.com/
-- `cnk3x/xunlei`（MIT）：非群晖 Linux 上运行迅雷套件的成熟实现，含群晖环境模拟
-- `Moechz/kavita`、`Moechz/sftpgo`、`Moechz/audiobookshelf`：真实 TOS 7 第三方
-  deb 应用，最佳实践参考（`build.sh` / `makedeb.sh` / `assets/`）
-- `RyanYang163/tos7-app-*`：**故意违规的审核测试语料**（20 个应用覆盖 54 条审核
-  条目 A1–I10），可用于反查审核红线，**不要当作正面样例**
+- 《TOS 7 Application Development Guide》（`terramaster-tos/tos-app-pkg-tools`）
+- 一方应用最佳实践：`/Volume1/@apps/qbittorrent`、`/Volume1/@apps/transmission`、`/Volume1/@apps/xunleipan`
+- 第三方 TOS 7 deb 应用参考：`Moechz/kavita`、`Moechz/sftpgo`、`Moechz/audiobookshelf`

@@ -1,0 +1,103 @@
+#!/bin/bash
+# postinst - first install and upgrade.
+set -e
+
+APP_ID="@@APP_ID@@"
+APP_ROOT="/usr/local/${APP_ID}"
+SHARE_NAME="@@SHARE_NAME@@"
+DATA_DIR="/var/lib/${APP_ID}"
+NGINX_ACTING="/etc/nginx/conf.d/${APP_ID}.conf"
+UNIT_SRC="${APP_ROOT}/init.d/${APP_ID}.service"
+UNIT_DST="/etc/systemd/system/${APP_ID}.service"
+LOG="/var/log/${APP_ID}-maint.log"
+
+echo "$(date '+%F %T') postinst $*" >> "$LOG" 2>/dev/null || true
+
+case "$1" in
+  configure)
+    # 1. Frontend archive -> ${APP_ROOT}/webui (flat archive, index.html at root)
+    if [ -f "${APP_ROOT}/webui.bz2" ]; then
+      mkdir -p "${APP_ROOT}/webui"
+      tar -xjf "${APP_ROOT}/webui.bz2" -C "${APP_ROOT}/webui" || true
+    fi
+
+    # 2. App-owned runtime state. Never inside the shared folder.
+    mkdir -p "${DATA_DIR}/bin" "${DATA_DIR}/.drive" "${DATA_DIR}/download"
+    chown -R ${APP_ID}:${APP_ID} "${DATA_DIR}" 2>/dev/null || true
+
+    # 3. Shared folder for user-visible data (downloads + account state).
+    #    Retained across upgrade and uninstall. The platform also declares
+    #    it through config.ini.share_folders; this is the belt-and-braces
+    #    path for manual `dpkg -i` installs.
+    #
+    #    -owner tells ter_share_add that the application user owns the
+    #    folder, which is what makes TOS provision access to it. The engine
+    #    runs unprivileged and /Volume* is mounted with the "tmacl" option,
+    #    so the application user needs an explicit rich ACL entry before it
+    #    can create files inside. The first-party qBittorrent and
+    #    Transmission applications make exactly the same calls (guide 10.6).
+    if [ -x /usr/sbin/ter_share_add ]; then
+      SHARE_PATH="$(/usr/sbin/ter_share_add -name "${SHARE_NAME}" -owner "${APP_ID}" 2>/dev/null || true)"
+      if [ -n "${SHARE_PATH}" ]; then
+        mkdir -p "${SHARE_PATH}/download"
+
+        # Non-recursive: an upgrade must never rewrite the ownership of an
+        # existing download tree.
+        chown ${APP_ID}:${APP_ID} "${SHARE_PATH}" "${SHARE_PATH}/download" 2>/dev/null || true
+
+        if command -v tmacltool >/dev/null 2>&1; then
+          tmacltool modify "${SHARE_PATH}" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true
+          tmacltool modify "${SHARE_PATH}/download" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true
+        fi
+
+        # Members of allusers may open the folders the user shares with the
+        # application (guide 10.6, second option).
+        command -v usermod >/dev/null 2>&1 && usermod -aG allusers "${APP_ID}" >/dev/null 2>&1 || true
+      fi
+    fi
+
+    # 3b. /etc/os-release repair (TOS platform defect).
+    #    The legacy Xunlei application (xunleipan 2.9.1) replaces
+    #    /etc/os-release with a symlink into its own ACL protected directory,
+    #    and deletes it outright when it stops. The Xunlei engine reads
+    #    /etc/os-release while detecting its platform and aborts with
+    #    "panic: platform not suport" when that read fails. The engine runs as
+    #    a dedicated non-root user here, so a readable file is mandatory.
+    #    Restore one, without touching the content the distribution ships.
+    if [ -f "${APP_ROOT}/os-release" ]; then
+      if [ ! -e /etc/os-release ]; then
+        install -m 0644 "${APP_ROOT}/os-release" /etc/os-release 2>/dev/null || true
+        echo "$(date '+%F %T') restored missing /etc/os-release" >> "$LOG" 2>/dev/null || true
+      elif ! su -s /bin/sh "${APP_ID}" -c 'test -r /etc/os-release' 2>/dev/null; then
+        _tmp="$(mktemp /etc/.os-release.XXXXXX 2>/dev/null || true)"
+        if [ -n "${_tmp}" ]; then
+          if cat /etc/os-release > "${_tmp}" 2>/dev/null && [ -s "${_tmp}" ]; then
+            chmod 0644 "${_tmp}"
+            chown 0:0 "${_tmp}" 2>/dev/null || true
+            mv -f "${_tmp}" /etc/os-release
+            echo "$(date '+%F %T') repaired /etc/os-release for ${APP_ID}" >> "$LOG" 2>/dev/null || true
+          else
+            rm -f "${_tmp}"
+          fi
+        fi
+      fi
+    fi
+
+    # 4. nginx route. The Jellyfin/Kavita-style pattern: the app ships the
+    #    snippet, the lifecycle script activates it.
+    if [ -f "${APP_ROOT}/nginx/${APP_ID}.conf" ] && [ -d /etc/nginx/conf.d ]; then
+      cp -f "${APP_ROOT}/nginx/${APP_ID}.conf" "$NGINX_ACTING"
+      systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || true
+    fi
+
+    # 5. Register and start the service.
+    if [ -f "$UNIT_SRC" ]; then
+      install -m 0644 "$UNIT_SRC" "$UNIT_DST"
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable "${APP_ID}.service" 2>/dev/null || true
+      systemctl restart "${APP_ID}.service" 2>/dev/null || true
+    fi
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,111 @@
+[zh-cn]
+name = "迅雷"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "迅雷远程下载，支持磁力、thunder、ftp、http、电驴等链接。"
+release_note = "1、使用迅雷官方 3.23.7 引擎，界面与功能同步升级。"
+important = "1、登录时请在 3 秒内完成扫码，建议先打开手机迅雷扫一扫；<br/>2、若二维码或登录界面无法加载，请到 TOS 控制面板 > 安全 > 常规，取消启用“使用 HTTP 内容安全策略（CSP）标头以提高安全性”。"
+
+[zh-hk]
+name = "迅雷"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "迅雷遠端下載，支援磁力、thunder、ftp、http、電驢等連結。"
+release_note = "1、使用迅雷官方 3.23.7 引擎，介面與功能同步升級。"
+important = "1、登入時請於 3 秒內完成掃碼；<br/>2、若二維碼無法載入，請於控制面板 > 安全 > 一般，取消啟用 HTTP 內容安全策略。"
+
+[en-us]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Xunlei remote download station. Magnet, thunder, ftp, http and ed2k links."
+release_note = "1. Ships the official Xunlei 3.23.7 engine."
+important = "1. Complete the QR sign-in within about 3 seconds; open the mobile Xunlei scanner first.<br/>2. If the QR code does not load, disable 'HTTP Content Security Policy (CSP)' under Control Panel > Security."
+
+[de-de]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Xunlei-Download-Station. Magnet-, thunder-, ftp-, http- und ed2k-Links."
+release_note = "1. Enthält die offizielle Xunlei-Engine 3.23.7."
+important = "1. QR-Anmeldung innerhalb von ca. 3 Sekunden abschließen."
+
+[fr-fr]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Station de téléchargement Xunlei. Liens magnet, thunder, ftp, http et ed2k."
+release_note = "1. Fournit le moteur Xunlei officiel 3.23.7."
+important = "1. Terminez la connexion par QR code en 3 secondes environ."
+
+[es-es]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Estación de descargas Xunlei. Enlaces magnet, thunder, ftp, http y ed2k."
+release_note = "1. Incluye el motor oficial Xunlei 3.23.7."
+important = "1. Complete el inicio de sesión por QR en unos 3 segundos."
+
+[pt-pt]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Estação de downloads Xunlei. Ligações magnet, thunder, ftp, http e ed2k."
+release_note = "1. Inclui o motor oficial Xunlei 3.23.7."
+important = "1. Conclua o início de sessão por QR em cerca de 3 segundos."
+
+[it-it]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Stazione di download Xunlei. Link magnet, thunder, ftp, http ed ed2k."
+release_note = "1. Include il motore ufficiale Xunlei 3.23.7."
+important = "1. Completa l'accesso con QR entro circa 3 secondi."
+
+[ru-ru]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Загрузочная станция Xunlei. Ссылки magnet, thunder, ftp, http и ed2k."
+release_note = "1. Включён официальный движок Xunlei 3.23.7."
+important = "1. Завершите вход по QR-коду примерно за 3 секунды."
+
+[pl-pl]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Stacja pobierania Xunlei. Linki magnet, thunder, ftp, http i ed2k."
+release_note = "1. Zawiera oficjalny silnik Xunlei 3.23.7."
+important = "1. Dokończ logowanie kodem QR w około 3 sekundy."
+
+[tr-tr]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Xunlei indirme istasyonu. Magnet, thunder, ftp, http ve ed2k baglantilari."
+release_note = "1. Resmi Xunlei 3.23.7 motorunu icerir."
+important = "1. QR ile girisi yaklasik 3 saniye icinde tamamlayin."
+
+[ja-jp]
+name = "迅雷"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "迅雷のリモートダウンロード。magnet、thunder、ftp、http、ed2k に対応。"
+release_note = "1. 迅雷公式 3.23.7 エンジンを搭載しました。"
+important = "1. QR ログインは3秒以内に完了してください。"
+
+[ko-kr]
+name = "쉰레이"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "쉰레이 원격 다운로드. magnet, thunder, ftp, http, ed2k 링크 지원."
+release_note = "1. 공식 쉰레이 3.23.7 엔진을 포함합니다."
+important = "1. QR 로그인을 약 3초 안에 완료하세요."
+
+[hu-hu]
+name = "Xunlei"
+auth = "Xunlei"
+version = "@@VERSION@@"
+descript = "Xunlei letolto allomas. Magnet, thunder, ftp, http es ed2k linkek."
+release_note = "1. A hivatalos Xunlei 3.23.7 motorral."
+important = "1. A QR bejelentkezest kb. 3 masodperc alatt fejezze be."

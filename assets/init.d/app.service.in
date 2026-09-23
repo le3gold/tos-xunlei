@@ -1,0 +1,56 @@
+[Unit]
+Description=Xunlei (迅雷) download station for TOS
+Documentation=@@HOMEPAGE@@
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=@@APP_ID@@
+Group=@@APP_ID@@
+WorkingDirectory=/usr/local/@@APP_ID@@
+EnvironmentFile=-/usr/local/@@APP_ID@@/@@APP_ID@@.env
+ExecStart=/usr/local/@@APP_ID@@/bin/@@APP_ID@@
+# The launcher spawns the engine as a child; the cgroup must take both down.
+KillMode=control-group
+TimeoutStartSec=90
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+
+# Sandbox: the engine only needs its own tree, its state dir and the share.
+# PrivateTmp is deliberately NOT set: this is a WebUI Internal Open
+# application and TOS keeps platform paths (/var/api) under /tmp.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+LimitNOFILE=65536
+UMask=0027
+
+# Writable paths. TOS places shared folders on whichever volume the user
+# chooses, so every plausible mount is listed; the "-" prefix makes
+# systemd ignore the ones that do not exist.
+ReadWritePaths=/var/lib/@@APP_ID@@
+ReadWritePaths=-/Volume1/@@SHARE_NAME@@
+ReadWritePaths=-/Volume2/@@SHARE_NAME@@
+ReadWritePaths=-/Volume3/@@SHARE_NAME@@
+ReadWritePaths=-/Volume4/@@SHARE_NAME@@
+ReadWritePaths=-/Volume5/@@SHARE_NAME@@
+ReadWritePaths=-/Volume6/@@SHARE_NAME@@
+ReadWritePaths=-/Volume7/@@SHARE_NAME@@
+ReadWritePaths=-/Volume8/@@SHARE_NAME@@
+ReadWritePaths=-/Volume9/@@SHARE_NAME@@
+
+[Install]
+WantedBy=multi-user.target

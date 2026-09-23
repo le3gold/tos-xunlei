@@ -1,0 +1,27 @@
+#!/bin/bash
+# postrm - remove package-owned files. User data is never deleted.
+set -e
+
+APP_ID="@@APP_ID@@"
+SHARE_NAME="@@SHARE_NAME@@"
+LOG="/var/log/${APP_ID}-maint.log"
+echo "$(date '+%F %T') postrm $*" >> "$LOG" 2>/dev/null || true
+
+case "$1" in
+  purge|remove)
+    rm -f "/etc/systemd/system/${APP_ID}.service"
+    systemctl daemon-reload 2>/dev/null || true
+    rm -f "/etc/nginx/conf.d/${APP_ID}.conf"
+    systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || true
+    rm -rf "/var/lib/${APP_ID}"
+    rm -rf "/usr/local/${APP_ID}/webui"
+    # The shared folder /Volume*/${SHARE_NAME} and everything in it is USER
+    # DATA and is deliberately left untouched.
+    ;;
+esac
+
+if [ "$1" = "purge" ]; then
+  rm -f "$LOG"
+fi
+
+exit 0

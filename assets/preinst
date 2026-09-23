@@ -1,0 +1,10 @@
+#!/bin/bash
+# preinst - TOS 7 Deb lifecycle.
+#
+# The platform creates the dedicated runtime user from config.ini."user"
+# before the package is configured, so no useradd/adduser is performed
+# here (TOS 7 Application Development Guide, Deb Development 8.14).
+set -e
+
+echo "$(date '+%F %T') preinst $*" >> /var/log/@@APP_ID@@-maint.log 2>/dev/null || true
+exit 0

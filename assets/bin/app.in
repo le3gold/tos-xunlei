@@ -1,0 +1,105 @@
+#!/bin/bash
+# TOS 7 entry point for @@APP_ID@@.
+#
+# systemd runs this as the dedicated @@APP_ID@@ user. It locates the shared
+# folder, prepares the app-owned state directory and then hands over to the
+# official Xunlei launcher, which starts the download engine.
+#
+# Environment variable names and the PLATFORM/NasId values are exactly the
+# ones the official TerraMaster Xunlei build uses, so Xunlei's cloud returns
+# the TerraMaster profile for this device.
+set -u
+
+APP_ID="@@APP_ID@@"
+APP_ROOT="/usr/local/${APP_ID}"
+BIN_DIR="${APP_ROOT}/bin"
+SHARE_NAME="@@SHARE_NAME@@"
+WEBUI_PORT="@@WEBUI_PORT@@"
+PUBLIC_PORT="@@PUBLIC_PORT@@"
+DATA_DIR="/var/lib/${APP_ID}"
+
+log() { echo "[${APP_ID}] $*"; }
+
+# 0. The Xunlei engine reads /etc/os-release while it detects its platform and
+#    aborts ("panic: platform not suport") when that read fails. The legacy
+#    Xunlei 2.9.1 application points /etc/os-release at a file this user
+#    cannot read, so say so plainly instead of letting the engine panic mute.
+if [ ! -r /etc/os-release ]; then
+    log "WARNING: /etc/os-release is not readable by $(id -un)."
+    log "WARNING: the Xunlei engine needs it for platform detection."
+    log "WARNING: repair it with:  sudo dpkg-reconfigure ${APP_ID}"
+fi
+
+# 1. Shared folder for user-visible data (downloads). ter_share_add creates
+#    it on first call and returns its real path; -owner records the
+#    application user as its owner. The platform also declares it through
+#    config.ini.share_folders.
+SHARE_PATH=""
+if [ -x /usr/sbin/ter_share_add ]; then
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        SHARE_PATH="$(/usr/sbin/ter_share_add -name "${SHARE_NAME}" -owner "${APP_ID}" 2>/dev/null || true)"
+        [ -n "${SHARE_PATH}" ] && break
+        sleep 2
+    done
+fi
+if [ -z "${SHARE_PATH}" ]; then
+    SHARE_PATH="/Volume1/${SHARE_NAME}"
+    log "ter_share_add unavailable, falling back to ${SHARE_PATH}"
+fi
+log "shared folder: ${SHARE_PATH}"
+
+# 1b. TerraMaster rich ACL. The engine is unprivileged and /Volume* is
+#     mounted with the "tmacl" option, so without an explicit allow entry for
+#     this user every write into the shared folder fails with EACCES. The
+#     first-party qBittorrent and Transmission applications make the same
+#     call from their service scripts (guide 10.6); repeating it here also
+#     covers the case where the folder was recreated after installation.
+if command -v tmacltool >/dev/null 2>&1; then
+    tmacltool modify "${SHARE_PATH}" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true
+    tmacltool modify "${SHARE_PATH}/download" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true
+fi
+
+# 2. App-owned runtime state. Never inside the shared folder.
+mkdir -p "${DATA_DIR}/bin" "${DATA_DIR}/.drive" "${DATA_DIR}/download" 2>/dev/null || true
+
+# 2b. The engine needs somewhere it can actually write. Prefer the shared
+#     folder so the downloaded files show up over SMB/NFS. When TOS has not
+#     granted this user access to it, keep working from the application's own
+#     data directory instead of failing every task, and say so loudly enough
+#     that the operator can fix the ACL.
+DOWNLOAD_PATH="${SHARE_PATH}/download"
+if ! mkdir -p "${DOWNLOAD_PATH}" 2>/dev/null || ! touch "${DOWNLOAD_PATH}/.${APP_ID}.write-test" 2>/dev/null; then
+    DOWNLOAD_PATH="${DATA_DIR}/download"
+    log "WARNING: ${SHARE_PATH}/download is not writable by $(id -un)."
+    log "WARNING: downloads are stored in ${DOWNLOAD_PATH} instead, which is"
+    log "WARNING: not visible in the shared folder over SMB/NFS."
+    log "WARNING: grant ${APP_ID} write access to ${SHARE_PATH} and restart"
+    log "WARNING: the application, or run:  sudo dpkg-reconfigure ${APP_ID}"
+    mkdir -p "${DOWNLOAD_PATH}" 2>/dev/null || true
+else
+    rm -f "${DOWNLOAD_PATH}/.${APP_ID}.write-test" 2>/dev/null || true
+fi
+log "download folder: ${DOWNLOAD_PATH}"
+
+# 3. Never let a stale launcher socket block startup.
+rm -f "${DATA_DIR}/bin/pan-cli-launcher.sock" "${DATA_DIR}/pan-cli.pid"
+
+# 4. Hand over to the official launcher.
+cd "${BIN_DIR}" || exit 1
+
+exec env \
+    PLATFORM="@@XL_PLATFORM@@" \
+    NasId="@@XL_PLATFORM@@" \
+    NAS_ID="@@XL_PLATFORM@@" \
+    ConfigPath="${DATA_DIR}" \
+    DownloadPATH="${DOWNLOAD_PATH}/" \
+    PluginPATH="${DATA_DIR}" \
+    HOME="${DATA_DIR}/.drive" \
+    DriveListen="0.0.0.0:${WEBUI_PORT}" \
+    DrivePublicPort="${PUBLIC_PORT}" \
+    drive_loglevel=info \
+    "${BIN_DIR}/xunlei-pan-cli-launcher.amd64" \
+        -logfile "${DATA_DIR}/pan-cli.log" \
+        -logsize 10MB \
+        -launcher_listen="unix://${DATA_DIR}/bin/pan-cli-launcher.sock" \
+        -pid "${DATA_DIR}/pan-cli.pid"

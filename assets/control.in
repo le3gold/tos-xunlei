@@ -1,0 +1,30 @@
+Package: @@APP_ID@@
+Version: @@VERSION@@
+Architecture: @@ARCH@@
+Maintainer: @@MAINTAINER@@
+Installed-Size: @@SIZE@@
+Depends: systemd, bash
+Section: web
+Priority: optional
+Homepage: @@HOMEPAGE@@
+Description: Xunlei (迅雷) download station for TOS 7
+ Xunlei remote download service for TerraMaster TOS 7, packaged from
+ the official Xunlei NAS engine (upstream platform build "linux") and
+ configured for platform "terramaster", so Xunlei's cloud serves this
+ device the TerraMaster profile.
+ .
+ The web UI opens inside the TOS desktop as an embedded iframe at
+ /@@APP_ID@@/. The engine serves its single page app on port
+ @@WEBUI_PORT@@ and the TOS nginx reverse proxies it under
+ /@@APP_ID@@/app/ , so nothing has to be forwarded on the router to use
+ the app locally.
+ .
+ Downloads live in the shared folder "@@SHARE_NAME@@" and stay reachable
+ over SMB/NFS. Login state and engine configuration live in
+ /var/lib/@@APP_ID@@ . Both survive upgrade and uninstall.
+ .
+ Engine: Xunlei (c) Xunlei Limited, distributed by Xunlei from its own
+ public CDN. This package only re-packages that official artifact for
+ TOS 7; it patches nothing inside the engine. See
+ /usr/local/@@APP_ID@@/PROVENANCE.md for the audit chain.
+ Upstream: https://www.xunlei.com    Packaged for TOS by @@PUBLISHER@@
