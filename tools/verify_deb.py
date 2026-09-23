@@ -338,6 +338,14 @@ def verify(deb_store, cfg, verbose=True):
     html = inner["index.html"][2].decode("utf-8")
     c.ok("<iframe" in html, "the loader page must mount the engine in an iframe")
     c.ok('src="./app/"' in html, "the loader iframe must point at ./app/")
+    c.ok('id="bar"' in html and "41px" in html,
+         "the loader must reserve the strip the TOS desktop overlays on"
+         " type:iframe windows (40px menu + 1px border); without it the"
+         " engine's own toolbar sits under the desktop's close button and"
+         " cannot be clicked")
+    c.ok("icon.svg" in inner,
+         "the title bar icon must ship inside webui.bz2; /images/... in"
+         " config.ini is not reachable from inside the window")
 
     # ---- lifecycle scripts
     scripts = {}

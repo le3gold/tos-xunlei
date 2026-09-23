@@ -101,7 +101,7 @@ systemctl status le3gold-xunlei
 | `/var/log/le3gold-xunlei-maint.log` | `postinst` | 生命周期脚本日志 | 删除 |
 | `/etc/os-release` | `postinst`，**仅当缺失或运行用户不可读时** | 修复被旧版迅雷破坏的发行版标识 | **不修改发行版内容**，见下节 |
 
-## 三处需要知道的行为
+## 需要知道的行为
 
 ### 1. `/etc/os-release` 修复
 
@@ -176,6 +176,24 @@ systemd 从这份副本启动，`WorkingDirectory` 用应用状态目录。
 > 实测：真机上在装上该修复前，服务反复以 200/CHDIR 重启，页面上就是 502；
 > 修复后服务 `active`、18889/18890 在听、`/le3gold-xunlei/`、
 > `/le3gold-xunlei/app/` 均返回 200。
+
+### 4. 标题栏由应用自己提供（TOS 的 iframe 窗口没有横幅）
+
+TOS 桌面**对 `type: "iframe"` 的应用不画标题栏**。桌面代码里判得很死：`hideTitle ||
+isIframe || ...` 一旦为真，整块 header（`.tos-dialog-header`）就不渲染；窗口顶部改由一条
+**40px 高、`position:absolute; top:0; width:100%`** 的 `.tos-dialog-menu.micro` 覆盖，
+它同时兼作拖拽区，并吃掉这一整条的鼠标事件。
+
+迅雷自己的工具栏（「新建任务」、搜索、帮助）恰好落在这条上，于是被桌面的关闭按钮压住，
+点不动。窗口里没有任何为应用预留的空间，只能由应用自己让出来：入口页
+（`webui.bz2` 里的 `index.html`）顶部画一条 41px 的标题栏（40px 菜单 + 1px 下边框），
+样式照 `.tos-dialog-header` 抄（高 40、左内边距 16、图标 24、间距 10），把迅雷 SPA 推到
+覆盖层下面。图标随 `webui.bz2` 一起发（`icon.svg`），因为 `config.ini` 里的
+`/images/icons/` 在窗口内访问不到。
+
+> 这是平台行为所致，不是本应用的特殊做法：所有 `type: "iframe"` 的应用都躲不开这 40px，
+> 只是各自用各自的方式让出来。
+
 ## 与《TOS 7 应用开发指南》的符合性
 
 | 条目 | 做法 |

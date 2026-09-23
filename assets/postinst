@@ -19,6 +19,13 @@ case "$1" in
     if [ -f "${APP_ROOT}/webui.bz2" ]; then
       mkdir -p "${APP_ROOT}/webui"
       tar -xjf "${APP_ROOT}/webui.bz2" -C "${APP_ROOT}/webui" || true
+      # The archive is built deterministically, so every member carries
+      # mtime 0 and the platform's nginx would hand these files out with
+      # "Last-Modified: Thu, 01 Jan 1970". A browser applies heuristic
+      # caching to a response like that, which means an upgrade can keep
+      # serving the previous entry page. Stamp them with the install time so
+      # the freshness check has something real to work with.
+      find "${APP_ROOT}/webui" -exec touch {} + 2>/dev/null || true
     fi
 
     # 2. App-owned runtime state. Never inside the shared folder.

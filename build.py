@@ -250,15 +250,36 @@ LOADER = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>迅雷</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%%; overflow: hidden; background: #14171c; }
-  iframe { display: block; border: 0; width: 100%%; height: 100%%; }
+  html, body { margin: 0; padding: 0; height: 100%%; overflow: hidden; background: #fff; }
+
+  /* TOS draws NO title bar for `type: "iframe"` applications. The desktop
+     overlays a 40px "micro" menu (.tos-dialog-menu.micro) across the top of
+     the window instead: it carries the drag handle plus the help / minimise /
+     maximise / close buttons, and it swallows the pointer events for that
+     whole strip. The Xunlei SPA puts its own toolbar in exactly that strip,
+     so its 新建任务 button sat under the desktop's close button and could not
+     be pressed. Nothing is reserved for the application, so the application
+     reserves it: this bar is the window's title bar, styled after the native
+     .tos-dialog-header (40px tall, 16px inset, 24px icon, 10px gap) and made
+     41px tall to clear that 40px menu plus its 1px bottom border. */
+  #bar {
+    height: 41px; box-sizing: border-box; display: flex; align-items: center;
+    padding-left: 16px; background: #fff; border-bottom: 1px solid rgba(0, 0, 0, .06);
+    font: 700 14px/41px system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #27313f; user-select: none; -webkit-user-select: none;
+  }
+  #bar img { width: 24px; height: 24px; display: block; }
+  #bar span { margin-left: 10px; }
+
+  #app { display: block; border: 0; width: 100%%; height: calc(100%% - 41px); }
 </style>
 </head>
 <body>
 <!-- The Xunlei SPA is served by the engine itself and reverse-proxied by
-     /%(app)s/app/ ; this page is only the fixed entry point that the TOS
-     desktop loads inside the app window. -->
-<iframe src="./app/" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+     /%(app)s/app/ ; this page is only the fixed entry point the TOS desktop
+     loads inside the application window, plus the title bar described above. -->
+<div id="bar"><img src="./icon.svg" alt="" /><span>迅雷</span></div>
+<iframe id="app" src="./app/" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
 </body>
 </html>
 """
@@ -266,7 +287,15 @@ LOADER = """<!DOCTYPE html>
 
 def build_webui(cfg, root):
     app = cfg["APP_ID"]
-    payload = {"index.html": (LOADER % {"app": app}).encode("utf-8")}
+    payload = {
+        "index.html": (LOADER % {"app": app}).encode("utf-8"),
+        # The title bar in the loader shows the application icon, so the icon
+        # has to travel with the archive the platform serves at /<appid>/ -
+        # the /images/icons/ path in config.ini is the App Center's own copy
+        # and is not reachable from inside the window.
+        "icon.svg": read(os.path.join(ASSETS, "images", "icons",
+                                      f"{app}.svg")).encode("utf-8"),
+    }
     out = os.path.join(root, "webui.bz2")
     buf = io.BytesIO()
     # deterministic: sorted names, root:root, mtime 0, no PAX headers
