@@ -1,0 +1,6 @@
+build/
+out/
+_vendor/
+__pycache__/
+*.deb
+*.spk
