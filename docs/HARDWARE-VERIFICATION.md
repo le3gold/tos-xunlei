@@ -100,7 +100,7 @@ DriveListen=0.0.0.0:21064 DrivePublicPort=21604 drive_loglevel=info \
 
 ---
 
-# 第二阶段：成品 deb 真机验证（1.0.0-1）
+# 第二阶段：成品 deb 真机验证（1.0.0）
 
 ## 安装与运行
 
@@ -179,3 +179,43 @@ TOS 自带 qBittorrent 的目录（`/Volume1/qBittorrent/qBittorrent/config`）�
 - `/etc/os-release` 目前是 `0644` 普通文件（本包修复的结果）。
 - 临时探针 `/tmp/tr-root`、`/tmp/xl-*`、`/tmp/le3gold-xunlei_x86_64.deb` 已删除。
 - 早期测试实例目录 `/Volume1/xunlei-353-test/` 仍在，确认无用后可 `rm -rf`。
+
+## 发现六：平台把应用放到存储卷后，非 root 服务无法读取自身（200/CHDIR）
+
+用户从应用中心安装后页面报 **502 Bad Gateway**。定位过程：
+
+| 检查 | 结果 |
+|---|---|
+| `systemctl status le3gold-xunlei` | `activating (auto-restart)`，`status=200/CHDIR` |
+| `dpkg -L` / `/usr/local/le3gold-xunlei` | 已是**符号链接** → `/Volume1/@apps/le3gold-xunlei`（平台按指南 10.7 迁移） |
+| `su -s /bin/bash le3gold-xunlei -c "cd /usr/local/le3gold-xunlei"` | **Permission denied** |
+| 逐层定位 | `/Volume1` 可穿越；**`/Volume1/@apps` 起被拒** |
+| `ls -ld /Volume1/@apps` | `drwxr-xr-x+ test test`（权限位 755，POSIX 允许） |
+| `tmacltool get /Volume1/@apps` | **无任何条目** |
+| 给应用用户 `tmacltool modify /Volume1/@apps user:...:allow:r-x---a-R-c--:fd--` 后再试 | `tmacltool get-perm` 显示 `r-x---a-R-c--`，但内核**仍然 `EACCES`** |
+| 对一方应用做同样检查（`qbittorrent` 用户访问自己的 `/Volume1/@apps/qbittorrent`） | **同样 Permission denied** |
+
+即：在这台 TOS 7 上，**任何非 root 用户都无法穿越 `/Volume1/@apps`**，
+tmacl 的授权调用不生效。而第三方 deb 应用的文件按设计就在
+`/Volume1/@apps/<appid>/`，因此任何以非 root 运行的应用都起不来：
+systemd 连 `WorkingDirectory` 都设不进去 → `200/CHDIR` → nginx 502。
+
+### 解决办法（已实装）
+
+不依赖平台修 ACL，让服务**不需要读 `/Volume1`**：
+
+- `postinst` 把入口脚本、启动器、引擎复制到 `/var/lib/le3gold-xunlei/runtime/`
+  （系统盘 `/`，ext4，无 `tmacl`），属主为应用用户；每次安装/升级刷新。
+- systemd 单元改为 `ExecStart=/var/lib/le3gold-xunlei/runtime/le3gold-xunlei`、
+  `WorkingDirectory=/var/lib/le3gold-xunlei`。
+- 入口脚本用 `readlink -f "$0"` 自定位，不再假定 `/usr/local/<appid>` 可读。
+- 引擎写在工作目录下的状态文件（`CidStore.DB` / `seq_id` / `setting.cfg`）
+  因此落在应用状态目录，而不是可执行文件旁边（升级时不会被动到权限）。
+
+修复后实测：服务 `active`，18889/18890 在听，`curl 127.0.0.1:18889/` → 200，
+经平台 nginx（8181）`/le3gold-xunlei/app/` → 200、`/le3gold-xunlei/` → 200。
+
+> 建议内部跟进：`/Volume1/@apps` 对非 root 用户不可访问且 ACL 授权无效，
+> 这与"第三方应用必须非 root 运行 + 文件放在存储卷"的设计直接冲突，
+> 会影响所有第三方 deb 应用。修复方式可以是平台在注册应用时授予 ACL，
+> 或让该 ACL 授权真正生效。

@@ -142,6 +142,17 @@ Release 地址：
 就 `panic: platform not suport`。`postinst` 只在**缺失或运行用户不可读**时修复，
 内容取自包内 `os-release`，并**从不修改已有可读文件的内容**。
 
+### 7.2 应用从系统盘的运行时副本启动（说明，非权限申请）
+
+TOS 会把应用文件迁移到 `/Volume*/@apps/<appid>/`（指南 10.7）。
+实测该路径对非 root 运行用户不可访问：`/Volume1/@apps` 起全部 `EACCES`，
+`tmacltool` 授权后也不生效（连 TOS 自带应用的用户访问自己的应用目录同样被拒）。
+服务因此连 `WorkingDirectory` 都设不进去，systemd 报 `200/CHDIR`，页面 502。
+
+本包的处理是：`postinst` 把入口脚本、启动器、引擎复制到
+`/var/lib/le3gold-xunlei/runtime/`（系统盘，属主为应用用户），systemd 从该副本启动。
+包内原始文件仍完整保留在应用目录中，只是服务运行时不依赖它。
+这是**读取自己的文件**，不涉及任何额外系统权限；见运行期文件清单。
 ### 7.2 共享文件夹 ACL
 
 `/Volume*` 以 `tmacl` 挂载，非 root 用户默认无法写入，需要对应用用户显式授权。
@@ -224,7 +235,7 @@ Release 地址：
 
 - 应用 ID / 版本 / 平台 / 资源名 / sha256：
   `le3gold-xunlei` / `1.0.0` / `x86_64` / `le3gold-xunlei_x86_64.deb` /
-  `53e1fb6a1a85662534028d01d76c12308d058daa1794b488ae2537a667becc10`
+  `8e68e177fd6518f6eec94956bb1cf3908f00a53e732f1d7572a85fca2916c3ee`
 - 真机：TOS 7（内核 6.12.63）安装后服务 `active` + `enabled`，
   `http://<NAS>:8181/le3gold-xunlei/app/` 返回 200，静态资源 200（1,527,665 字节），
   `POST …/device/info/watch` 返回 403 JSON 鉴权响应（说明请求真实到达迅雷 API）。

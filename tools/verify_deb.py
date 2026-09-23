@@ -269,8 +269,13 @@ def verify(deb_store, cfg, verbose=True):
     exec_match = re.search(r"^ExecStart=(.*)$", usvc, re.M)
     c.ok(exec_match, "unit needs an ExecStart")
     c.ok("$" not in exec_match.group(1), "ExecStart must not contain shell variables")
-    c.ok(exec_match.group(1).strip() == "/usr/local/%s/bin/%s" % (app, app),
-         "ExecStart must point at /usr/local/%s/bin/%s" % (app, app))
+    c.ok(exec_match.group(1).strip() == "/var/lib/%s/runtime/%s" % (app, app),
+         "ExecStart must point at /var/lib/%s/runtime/%s; TOS moves the"
+         " payload onto a volume whose rich ACL may not admit this user,"
+         " so the service must run from its own copy" % (app, app))
+    c.ok("WorkingDirectory=/var/lib/%s\n" % app in usvc,
+         "WorkingDirectory must be the application state directory, never the"
+         " payload path (systemd fails with 200/CHDIR otherwise)")
     c.ok("EnvironmentFile=" in usvc, "unit should load the packaged EnvironmentFile")
 
     # ---- nginx snippet
@@ -301,6 +306,13 @@ def verify(deb_store, cfg, verbose=True):
     c.ok(cfg["XL_PLATFORM"] in e, "entry point must pass PLATFORM=terramaster")
     c.ok("xunlei-pan-cli-launcher.%s" % cfg["ARCH"] in e,
          "entry point must start the official launcher")
+    c.ok('readlink -f "$0"' in e,
+         "entry point must resolve its own directory; the runtime copy and "
+         "the packaged tree are different paths")
+    e_code = "\n".join(re.sub(r"#.*$", "", l) for l in e.splitlines())
+    c.ok("/usr/local/" not in e_code,
+         "entry point must not depend on /usr/local/<appid>: TOS relocates it "
+         "onto a volume the application user may not be able to read")
 
     # ---- engine payload, byte for byte
     engine = root + "/bin/xunlei-pan-cli.%s.%s" % (cfg["ENGINE_VERSION"], cfg["ARCH"])
@@ -356,6 +368,11 @@ def verify(deb_store, cfg, verbose=True):
     c.ok("-owner" in postinst,
          "postinst must pass -owner to ter_share_add so TOS provisions the"
          " shared folder for the application user (guide 10.6)")
+    c.ok("RUNTIME_DIR" in postinst and
+         "cp -f" in postinst and
+         "xunlei-pan-cli-launcher." in postinst,
+         "postinst must copy the executables into the application's own "
+         "runtime directory; the service runs from that copy")
     c.ok("tmacltool" in postinst and
          "user:${APP_ID}:allow:rwxpdDaARWc:fd" in postinst,
          "postinst must grant the application user the TerraMaster rich ACL"

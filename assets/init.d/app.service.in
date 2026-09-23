@@ -10,9 +10,9 @@ StartLimitIntervalSec=60
 Type=simple
 User=@@APP_ID@@
 Group=@@APP_ID@@
-WorkingDirectory=/usr/local/@@APP_ID@@
+WorkingDirectory=/var/lib/@@APP_ID@@
 EnvironmentFile=-/usr/local/@@APP_ID@@/@@APP_ID@@.env
-ExecStart=/usr/local/@@APP_ID@@/bin/@@APP_ID@@
+ExecStart=/var/lib/@@APP_ID@@/runtime/@@APP_ID@@
 # The launcher spawns the engine as a child; the cgroup must take both down.
 KillMode=control-group
 TimeoutStartSec=90

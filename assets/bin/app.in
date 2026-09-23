@@ -1,9 +1,19 @@
 #!/bin/bash
 # TOS 7 entry point for @@APP_ID@@.
 #
-# systemd runs this as the dedicated @@APP_ID@@ user. It locates the shared
-# folder, prepares the app-owned state directory and then hands over to the
-# official Xunlei launcher, which starts the download engine.
+# systemd runs this as the dedicated @@APP_ID@@ user from
+# /var/lib/@@APP_ID@@/runtime, which is a copy of the executables owned by that
+# user. It locates the shared folder, prepares the app-owned state directory
+# and then hands over to the official Xunlei launcher, which starts the
+# download engine.
+#
+# The copy exists because TOS installs third-party applications on a storage
+# volume (/Volume*/@apps/<appid>/, with /usr/local/<appid> pointing at it) and
+# protects /Volume* with the TerraMaster rich ACL. On TOS 7 builds where that
+# ACL does not admit the application user, an unprivileged service cannot read
+# its own directory at all and systemd fails it with 200/CHDIR. postinst
+# refreshes this copy on every install, so the service only ever needs paths
+# that belong to it.
 #
 # Environment variable names and the PLATFORM/NasId values are exactly the
 # ones the official TerraMaster Xunlei build uses, so Xunlei's cloud returns
@@ -11,8 +21,7 @@
 set -u
 
 APP_ID="@@APP_ID@@"
-APP_ROOT="/usr/local/${APP_ID}"
-BIN_DIR="${APP_ROOT}/bin"
+BIN_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
 SHARE_NAME="@@SHARE_NAME@@"
 WEBUI_PORT="@@WEBUI_PORT@@"
 PUBLIC_PORT="@@PUBLIC_PORT@@"
@@ -80,12 +89,17 @@ else
     rm -f "${DOWNLOAD_PATH}/.${APP_ID}.write-test" 2>/dev/null || true
 fi
 log "download folder: ${DOWNLOAD_PATH}"
+log "runtime folder: ${BIN_DIR}"
 
 # 3. Never let a stale launcher socket block startup.
 rm -f "${DATA_DIR}/bin/pan-cli-launcher.sock" "${DATA_DIR}/pan-cli.pid"
 
-# 4. Hand over to the official launcher.
-cd "${BIN_DIR}" || exit 1
+# 4. Hand over to the official launcher, from the copy this user can read.
+#    The working directory is the application state directory, not the
+#    runtime copy: the engine drops its own state files (CidStore.DB,
+#    seq_id, setting.cfg) into the current directory, and those must not sit
+#    next to the executables, which postinst rewrites on every upgrade.
+cd "${DATA_DIR}" || exit 1
 
 exec env \
     PLATFORM="@@XL_PLATFORM@@" \
@@ -98,7 +112,7 @@ exec env \
     DriveListen="0.0.0.0:${WEBUI_PORT}" \
     DrivePublicPort="${PUBLIC_PORT}" \
     drive_loglevel=info \
-    "${BIN_DIR}/xunlei-pan-cli-launcher.amd64" \
+    "${BIN_DIR}/xunlei-pan-cli-launcher.@@ARCH@@" \
         -logfile "${DATA_DIR}/pan-cli.log" \
         -logsize 10MB \
         -launcher_listen="unix://${DATA_DIR}/bin/pan-cli-launcher.sock" \

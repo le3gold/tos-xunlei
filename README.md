@@ -90,6 +90,8 @@ systemctl status le3gold-xunlei
 | `/var/lib/le3gold-xunlei/bin/` | 首次启动 | 启动器 unix socket 目录 | 删除 |
 | `/var/lib/le3gold-xunlei/.drive/**` | 首次启动 | 登录态、下载进度、引擎自更新后的副本 | 删除 |
 | `/var/lib/le3gold-xunlei/download/` | `postinst` / 首次启动 | 下载回退目录（共享目录不可写时使用） | 删除 |
+| `/var/lib/le3gold-xunlei/runtime/**` | `postinst`，每次安装/升级刷新 | 运行用户可读的**可执行文件副本**（入口脚本 + 启动器 + 引擎） | 删除 |
+| `/var/lib/le3gold-xunlei/{CidStore.DB,seq_id,setting.cfg}` | 首次启动 | 引擎写在其工作目录下的状态文件 | 删除 |
 | `/var/lib/le3gold-xunlei/pan-cli.log` | 首次启动 | 引擎日志（10MB 轮转） | 删除 |
 | `/var/lib/le3gold-xunlei/pan-cli.pid`、`pan-cli.pid.child` | 首次启动 | 启动器与引擎 PID | 删除 |
 | `/Volume1/XunLeiPlus/download/**` | `postinst` | **用户数据**：下载完成的文件，SMB/NFS 可见 | **保留** |
@@ -98,7 +100,7 @@ systemctl status le3gold-xunlei
 | `/var/log/le3gold-xunlei-maint.log` | `postinst` | 生命周期脚本日志 | 删除 |
 | `/etc/os-release` | `postinst`，**仅当缺失或运行用户不可读时** | 修复被旧版迅雷破坏的发行版标识 | **不修改发行版内容**，见下节 |
 
-## 两处需要知道的行为
+## 三处需要知道的行为
 
 ### 1. `/etc/os-release` 修复
 
@@ -136,6 +138,24 @@ tmacltool modify /Volume1/XunLeiPlus "user:le3gold-xunlei:allow:rwxpdDaARWc:fd"
 > 也无法写入 `/Volume1` 下任何目录（含 777 目录），ACL 已授权的情况下依然 `EACCES`。
 > 这属于该机器的 ACL 层状态，不是本包引入的问题；本包因此必须带这个回退。
 
+### 3. 应用文件被平台放到存储卷上，运行用户可能读不到
+
+TOS 会把第三方应用安装到存储卷：`/Volume1/@apps/le3gold-xunlei/`，
+并把 `/usr/local/le3gold-xunlei` 做成指向它的符号链接（指南 10.7）。
+
+问题在于 `/Volume*` 以 `tmacl` 挂载，而**运行用户对 `/Volume1/@apps` 及其下任何
+目录都没有访问权**（权限位是 755，是 ACL 层拒绝的；`tmacltool` 授权后依然 `EACCES`）。
+后果是 systemd 连 `WorkingDirectory` 都设不进去，服务以
+`status=200/CHDIR` 失败，nginx 反代 502。
+
+因此 `postinst` 会把入口脚本、启动器、引擎复制一份到
+`/var/lib/le3gold-xunlei/runtime/`（系统盘，无 tmacl），属主为该应用用户；
+systemd 从这份副本启动，`WorkingDirectory` 用应用状态目录。
+这样服务完全不依赖 `/Volume1`，每次安装/升级都会刷新副本。
+
+> 实测：真机上在装上该修复前，服务反复以 200/CHDIR 重启，页面上就是 502；
+> 修复后服务 `active`、18889/18890 在听、`/le3gold-xunlei/`、
+> `/le3gold-xunlei/app/` 均返回 200。
 ## 与《TOS 7 应用开发指南》的符合性
 
 | 条目 | 做法 |
@@ -147,6 +167,7 @@ tmacltool modify /Volume1/XunLeiPlus "user:le3gold-xunlei:allow:rwxpdDaARWc:fd"
 | 8.14 / 10.3 | `config.ini.user` = `le3gold-xunlei`，systemd `User=` 同名；生命周期脚本**不创建用户**；`User=root` 禁止 |
 | 10.4 | 程序与配置对服务只读，只有数据/日志目录可写；`ProtectSystem=strict` + `ReadWritePaths` |
 | 10.6 | 共享文件夹用 `ter_share_add -owner` 创建，并按一方应用方式补 Rich ACL |
+| 10.7 / 12.1 | 包内布局与官方单包模板一致（`/usr/local/<id>`）；平台会把文件迁移到 `/Volume*/@apps/<id>`，本包为此提供运行时副本（见上文第 3 点） |
 | 12.9.6 | 运行期文件清单见上 |
 | 发布 | Release 资源名 `<应用ID>_<平台>.deb`，不带版本号 |
 | nginx | 只用平台已定义的变量（TOS 的 nginx **没有** `$connection_upgrade`，故用字面量 `Connection upgrade`） |

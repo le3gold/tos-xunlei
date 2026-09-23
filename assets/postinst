@@ -24,6 +24,29 @@ case "$1" in
     # 2. App-owned runtime state. Never inside the shared folder.
     mkdir -p "${DATA_DIR}/bin" "${DATA_DIR}/.drive" "${DATA_DIR}/download"
     chown -R ${APP_ID}:${APP_ID} "${DATA_DIR}" 2>/dev/null || true
+    # 2b. Runtime copy of the executables, on the system volume.
+    #     TOS installs third-party applications on a storage volume
+    #     (/Volume*/@apps/<appid>/, with /usr/local/<appid> symlinked to it) and
+    #     protects /Volume* with the TerraMaster rich ACL. On TOS 7 builds where
+    #     that ACL does not admit the application user - measured on a real
+    #     TNAS, where no non-root user can traverse /Volume*/@apps at all - the
+    #     unprivileged service cannot even read its own directory, and systemd
+    #     fails the unit with 200/CHDIR. Running from a copy owned by the
+    #     application user removes that dependency entirely. The copy is
+    #     refreshed on every install, so an upgrade always carries the current
+    #     engine.
+    RUNTIME_DIR="${DATA_DIR}/runtime"
+    mkdir -p "${RUNTIME_DIR}"
+    for _f in "bin/${APP_ID}" "bin/xunlei-pan-cli-launcher.@@ARCH@@" \
+              "bin/xunlei-pan-cli.@@ENGINE_VERSION@@.@@ARCH@@"; do
+      if [ -f "${APP_ROOT}/${_f}" ]; then
+        cp -f "${APP_ROOT}/${_f}" "${RUNTIME_DIR}/"
+        # Only the files copied here get their mode set: the engine keeps its
+        # own state in this tree on older installs and that must not change.
+        chmod 0755 "${RUNTIME_DIR}/$(basename "${_f}")" 2>/dev/null || true
+      fi
+    done
+    chown -R ${APP_ID}:${APP_ID} "${RUNTIME_DIR}" 2>/dev/null || true
 
     # 3. Shared folder for user-visible data (downloads + account state).
     #    Retained across upgrade and uninstall. The platform also declares
