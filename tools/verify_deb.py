@@ -377,9 +377,17 @@ def verify(deb_store, cfg, verbose=True):
          "user:${APP_ID}:allow:rwxpdDaARWc:fd" in postinst,
          "postinst must grant the application user the TerraMaster rich ACL"
          " on the shared folder, as the first-party download apps do")
-    c.ok("tmacltool" in e and
-         "user:${APP_ID}:allow:rwxpdDaARWc:fd" in e,
-         "entry point must re-assert the rich ACL on the shared folder")
+    c.ok("SHARE_VOL" in postinst and
+         "user:${APP_ID}:allow:r-x:--" in postinst,
+         "postinst must grant the application user traversal of the volume"
+         " root; without it the entry on the shared folder is unreachable"
+         " (docs/PLATFORM-DEFECT.md)")
+    c.ok("tmacltool" not in e,
+         "the entry point runs as the application user and must not pretend"
+         " to change ACLs")
+    c.ok("tmacltool del" in postrm and
+         "user:${APP_ID}:allow:r-x:--" in postrm,
+         "postrm must remove the volume-root traversal entry it added")
     c.ok("not writable by" in e,
          "entry point must probe the shared folder and report it unwritable")
     c.ok("${DATA_DIR}/download" in e,

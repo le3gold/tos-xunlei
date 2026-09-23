@@ -54,20 +54,58 @@ case "$1" in
     #    path for manual `dpkg -i` installs.
     #
     #    -owner tells ter_share_add that the application user owns the
-    #    folder, which is what makes TOS provision access to it. The engine
-    #    runs unprivileged and /Volume* is mounted with the "tmacl" option,
-    #    so the application user needs an explicit rich ACL entry before it
-    #    can create files inside. The first-party qBittorrent and
-    #    Transmission applications make exactly the same calls (guide 10.6).
+    #    folder and provisions the folder's own ACL entry. It does not, by
+    #    itself, make the folder reachable: see 3a below.
     if [ -x /usr/sbin/ter_share_add ]; then
       SHARE_PATH="$(/usr/sbin/ter_share_add -name "${SHARE_NAME}" -owner "${APP_ID}" 2>/dev/null || true)"
       if [ -n "${SHARE_PATH}" ]; then
+        # 3a. Traversal permission on the volume root.
+        #
+        #     Workaround for a TOS 7 platform defect; see
+        #     docs/PLATFORM-DEFECT.md for the measurements, and for what has
+        #     to change in the platform before this block can be deleted.
+        #
+        #     TerraMaster's rich ACL ("tmacl", the btrfs mount option behind
+        #     /Volume*) is deny-by-default and does not fall back to the POSIX
+        #     mode bits. Measured on a TNAS running TOS 7:
+        #
+        #       $ tmacltool get-perm /Volume1 <application uid>
+        #       max_permission: -------------
+        #
+        #     even though that directory is mode 755, and `tmacltool get
+        #     /Volume1` prints an empty list - no volume root on the system
+        #     carries a single entry. Every non-root uid is refused as a
+        #     result, not just this application's user: the built-in
+        #     qbittorrent and transmission accounts and ordinary TOS users are
+        #     refused in exactly the same way. Traversing a path needs
+        #     permission at every level of it, so a correct entry on the
+        #     shared folder stays unreachable while the volume root above it
+        #     has none - which is why `ter_share_add -owner` on its own leaves
+        #     the folder unusable for an unprivileged application.
+        #
+        #     The minimum repair is traversal only ("r-x"), with no
+        #     inheritance, for this application's own user, on the single
+        #     volume that holds the folder. Read and write authority is
+        #     granted separately, on the folder itself, in 3b; this entry adds
+        #     nothing beyond the ability to reach it.
+        SHARE_VOL="$(printf '%s\n' "${SHARE_PATH}" | sed -n 's#^\(/Volume[0-9][0-9]*\)/.*#\1#p')"
+        if [ -n "${SHARE_VOL}" ] && command -v tmacltool >/dev/null 2>&1; then
+          if ! tmacltool modify "${SHARE_VOL}" "user:${APP_ID}:allow:r-x:--" >/dev/null 2>&1; then
+            echo "$(date '+%F %T') WARNING: ${APP_ID} cannot traverse ${SHARE_VOL}; downloads will not reach ${SHARE_PATH}" >> "$LOG" 2>/dev/null || true
+          fi
+        fi
+
         mkdir -p "${SHARE_PATH}/download"
 
         # Non-recursive: an upgrade must never rewrite the ownership of an
         # existing download tree.
         chown ${APP_ID}:${APP_ID} "${SHARE_PATH}" "${SHARE_PATH}/download" 2>/dev/null || true
 
+        # 3b. Read and write authority on the folder itself. This is the entry
+        #     that governs the download directory, and it only takes effect
+        #     together with the traversal entry from 3a. The first-party
+        #     qBittorrent and Transmission applications make this same call
+        #     (guide 10.6).
         if command -v tmacltool >/dev/null 2>&1; then
           tmacltool modify "${SHARE_PATH}" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true
           tmacltool modify "${SHARE_PATH}/download" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true

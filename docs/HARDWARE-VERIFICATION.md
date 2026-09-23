@@ -170,8 +170,14 @@ TOS 自带 qBittorrent 的目录（`/Volume1/qBittorrent/qBittorrent/config`）�
 2. 启动时**实测**共享目录可写性，不可写则回退到 `/var/lib/le3gold-xunlei/download`
    并输出明确告警，保证下载功能不因此整体失效。
 
-> 建议内部跟进：确认 TOS 7 在共享目录重建/迁移后是否会丢失 app 用户的 Rich ACL，
-> 以及为什么 `tmacltool` 报已授权而内核仍拒绝。
+> **更正（同日稍后查明，见发现七）**：本节结论「与 ACL 是否授权无关」不准确。
+> `tmacltool get-perm` 报已授权是针对**文件夹**的；真正缺的是**卷根 `/Volume1`** 上的
+> 条目 —— tmacl 不回落到 POSIX mode 位，非 root 用户连穿越都做不到，文件夹上的条目
+> 因而永远没被检查到。在卷根补一条 `r-x` 后，本节列出的所有 `EACCES` 全部消失。
+> 准确说法是：**与文件夹上的授权无关，缺的是卷根上的授权。**
+
+> 建议内部跟进：`ter_share_add -owner` 只写文件夹自身的 ACE、不写卷根，会让按指南
+> 10.6 写的应用全部不可用。详见 `docs/PLATFORM-DEFECT.md`。
 
 ## 清理状态
 
@@ -219,3 +225,64 @@ systemd 连 `WorkingDirectory` 都设不进去 → `200/CHDIR` → nginx 502。
 > 这与"第三方应用必须非 root 运行 + 文件放在存储卷"的设计直接冲突，
 > 会影响所有第三方 deb 应用。修复方式可以是平台在注册应用时授予 ACL，
 > 或让该 ACL 授权真正生效。
+
+## 发现七：卷根没有 ACE 才是真正的根因 —— 补一条穿越权限即完全修复
+
+### 调查过程
+
+1. `ps -eo user,uid,pid,args` 加 `/proc/<pid>/status` 逐个核对：TOS 自带的 PHP74、
+   OnlyOffice、TerraSync、DockerEngine、VMs、openclaw、terai … 共 30 个应用
+   **全部是 uid 0**；`/etc/systemd/system/PHP74.service` 里写的就是 `User=0`。
+   `ps -eo uid | sort | uniq -c` 中 uid >= 1000 的进程数：**0**（唯一的非 root 应用
+   进程，是我们自己那对 uid 997 的引擎进程）。→ 平台自己也从不以非 root 运行。
+2. `grep Volume1 /proc/mounts` -> `btrfs rw,noatime,tmacl,...`；
+   `/sys/kernel/security/lsm` -> `lockdown,capability,landlock,yama,bpf,ipe,ima,evm`，
+   **没有 SMACK**。标签路线（`security.SMACK64`）能写但无效，印证了这不是标签问题。
+3. `ls -ld /Volume1` -> `drwxr-xr-x+`（755，others 本应可穿越）；
+   `tmacltool get /Volume1` -> **空**（`/Volume10` 同样为空）；
+   `tmacltool get-perm /Volume1 997` -> `max_permission: -------------`。
+   → tmacl **默认拒绝**，且**不回落**到 `other` 位。
+4. 用 `setpriv --reuid=<uid> --regid=<uid> --clear-groups ls /Volume1` 逐个验证：
+   uid 997（本应用）、10003（qbittorrent）、10001（PHP80）、1001（guest）**全部**
+   `Permission denied`；uid 0 正常。再用 `su -s /bin/sh le3gold-xunlei -c ...`（带真实
+   附加组，包含 `allusers`）复核，结果相同 —— 排除「组没带对」。
+5. 隔离实验：先 `tmacltool clear /Volume1` 还原成空（实验前本来就是空），确认故障重现；
+   再 `ter_share_add -name XunLeiTest2 -owner le3gold-xunlei` 新建一个共享目录，对比
+   `/Volume1` 与 `/Volume1/XunLeiTest2` 的 ACL —— **新目录有 ACE，卷根依旧为空**，
+   应用用户仍然 `Permission denied`。→ `ter_share_add -owner` 不会补卷根。
+
+### 修复验证
+
+```sh
+tmacltool modify /Volume1 "user:le3gold-xunlei:allow:r-x:--"
+```
+
+| 检查 | 结果 |
+|---|---|
+| `ls /Volume1`（以应用用户） | OK |
+| `touch /Volume1/XunLeiPlus/x` | OK |
+| `mkdir -p /Volume1/XunLeiPlus/download` 并写入 | OK |
+| 引擎日志 `download_paths` | `["/Volume1/XunLeiPlus/download/"]` |
+| 引擎 fsnotify | 探针文件一落盘即被引擎监听到，说明引擎确实在盯该目录 |
+
+`r-x` 是穿越所需的最小权限，**不带继承标志**（显示为 `r-x----------:----`），不会向卷内
+其它目录扩散；读写权限仍由文件夹本体的条目决定。
+
+### 实装方式
+
+- `assets/postinst` 步骤 3a：解析出承载共享文件夹的卷，为**本应用自己的用户**补 `r-x`。
+- `assets/postrm`：卸载时 `tmacltool del` 掉该条目，避免留下悬空 uid。
+- `assets/bin/app.in`：删掉原先那两句**无效**的 `tmacltool modify`（以应用用户身份运行
+  本来就改不动 ACL），保留可写性实测与告警。
+- `tools/verify_deb.py`：新增 3 条断言（postinst 必须补卷根穿越、入口脚本不得假装改
+  ACL、postrm 必须删除该条目）。断言总数 228 -> 230。
+
+### 验证流程（可重复）
+
+1. 删掉卷根条目 -> 故障复现（以应用用户 `touch` 被拒）。
+2. `dpkg -i out/le3gold-xunlei_1.0.0_amd64.deb`。
+3. 卷根条目被 postinst 自动补回；应用用户可穿越，并可写 `XunLeiPlus/download`。
+4. 服务 `active` + `enabled`；18889 -> 200；平台 nginx `/le3gold-xunlei/app/` -> 200。
+
+清理：探针目录 `/Volume1/XunLeiTest`、`/Volume1/XunLeiTest2` 已删除；`/Volume10` 上的
+实验 ACE 已 `clear` 干净。

@@ -9,10 +9,14 @@ Stages:  fetch -> stage -> webui -> deb -> verify
 
 Products (out/):
   <APP_ID>_<VERSION>_<ARCH>.deb      full-version name, for local dpkg -i
-  <APP_ID>_<PLATFORM>.deb            release asset name (version lives in the tag)
+  <APP_ID>_<PLATFORM>.deb            release asset name (recommended form; the
+                                     platform decides the package type from the
+                                     .deb extension and reads the version from
+                                     config.ini, not from the release tag)
   <APP_ID>_<PLATFORM>.deb.sha256     checksum sidecar required by the platform
 """
 import bz2
+import gzip
 import hashlib
 import io
 import json
@@ -344,9 +348,18 @@ def write_deb(cfg, root):
         fh.write("\n".join(sorted(lines)) + "\n")
 
     # ---- tar members ----
+    # Deterministic container. gzip writes an mtime of its own accord, and
+    # that alone changed the digest of the whole package on every build even
+    # though not one byte of the payload differed. Pinning it to EPOCH makes
+    # the same sources always produce the same .deb, so the sha256 published
+    # alongside a release stays meaningful.
     ctrl_tar = os.path.join(work, "control.tar.gz")
-    with tarfile.open(ctrl_tar, "w:gz", format=GH_FORMAT) as tf:
-        _add_tree(tf, ctrl_dir, prefix="./", modes=ctrl_modes)
+    with open(ctrl_tar, "wb") as _ctrl_out:
+        with gzip.GzipFile(fileobj=_ctrl_out, mode="wb", mtime=EPOCH,
+                           compresslevel=9) as _ctrl_gz:
+            with tarfile.open(fileobj=_ctrl_gz, mode="w",
+                              format=GH_FORMAT) as tf:
+                _add_tree(tf, ctrl_dir, prefix="./", modes=ctrl_modes)
 
     # Walk from the staging root: dpkg needs every member under ./usr/local/<app>/
     data_tar = os.path.join(work, "data.tar.xz")

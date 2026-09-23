@@ -17,22 +17,26 @@
 
 > 应用 ID 一旦发布**不可修改**，改名只能重新作为新应用提审。
 
-### Step 5：[Version Management] → [Add Version]
+### Step 5：提交一个版本
 
-| 字段 | 填写内容 |
-|---|---|
-| 版本号 | `1.0.0` |
+> 依据 2026-09-23 的指南更新（第 04 章 `7be7310`、第 03 章 `a024516`）：
+> **平台已取消手工填写的版本号字段**（原 `Version To List`）。提交动作 = 在该页面
+> **选中你仓库 Releases 里的一个 tag**，平台从该 Release 下载包来审。版本号由平台
+> 从包内的 `config.ini` 读取，`config.ini.version` 是唯一权威来源；`DEBIAN/control`
+> 的 `Version` 仍会被校验，必须与它一致。
 
-> 版本号格式固定 `xx.yy.zzz`，且必须与下列三处完全一致，否则自动校验直接拒：
->
-> | 位置 | 当前值 |
-> |---|---|
-> | 平台填写的版本号 | `1.0.0` |
-> | `config.ini` 的 `version` | `1.0.0` |
-> | `DEBIAN/control` 的 `Version` | `1.0.0` |
-> | GitHub Release tag | `v1.0.0` |
->
-> 本包已刻意**不带包修订号**（不用 `1.0.0-1` 这种形式），就是为了让四处完全相等。
+| 项 | 当前值 | 说明 |
+|---|---|---|
+| `config.ini` 的 `version` | `1.0.0` | **权威**：平台以此为准 |
+| `DEBIAN/control` 的 `Version` | `1.0.0` | 仍被校验，必须与上一致 |
+| GitHub Release tag | `v1.0.0` | 新规则下**不参与版本判定**，仅用于挑选包 |
+
+> ⚠️ 指南目前**自相矛盾**，提审时按下面的稳妥做法处理：
+> 第 04 章已改为"tag 不必等于 `config.ini.version`、版本不由 tag 决定"，但第 15 章
+> 的 Step 3 / Step 5 / Step 6 仍是旧规则（"tag 必须与 `config.ini.version` 完全
+> 一致，否则自动驳回"），第 15 章 Step 3 的资源命名也仍写成强制。本包让 tag 与
+> 版本**同名**、资源名用推荐格式，因此两套说法下都合规。建议同步反馈文档组把
+> 第 15 章对齐到第 04 章。
 
 ---
 
@@ -42,8 +46,8 @@
 |---|---|
 | 仓库公开 | ✅ `https://github.com/le3gold/tos-xunlei`（public） |
 | 包放 Release 资源，不放仓库根目录 | ✅ 仓库根目录无任何 `.deb`（`.gitignore` 已排除） |
-| Release tag = `config.ini.version` | ✅ `v1.0.0` ↔ `1.0.0` |
-| 资源命名 `<app_id>_<platform>.deb`，**不带版本号** | ✅ `le3gold-xunlei_x86_64.deb` |
+| Release tag | ✅ `v1.0.0`（新规则下 tag 自由，取与版本同名只为可读） |
+| 资源命名（新规则为"推荐名"，平台实际只按扩展名 `.deb` 判定包型） | ✅ `le3gold-xunlei_x86_64.deb` |
 | 每个二进制资源附 SHA-256 | ✅ `le3gold-xunlei_x86_64.deb.sha256` |
 | 一个 Release 只有一个架构、一种包格式 | ✅ 仅 `x86_64` 的单一 deb |
 | 资源长期可用、不删除 | ⚠️ 需保持仓库与 Release 长期不删（已发布资源不得删除） |
@@ -109,6 +113,7 @@ Release 地址：
 | 文件系统：`/var/lib/le3gold-xunlei` | 运行态数据、日志、登录态、引擎自更新副本 |
 | 文件系统：`/usr/local/le3gold-xunlei` | 程序本体（服务只读） |
 | 共享文件夹：`XunLeiPlus` | 用户可见的下载内容（SMB/NFS） |
+| 共享文件夹 ACL：所载卷根的**穿越**权限 | TOS 7 的 tmacl 默认拒绝所有非 root 用户穿越卷根，文件夹自身的 ACL 因此不可达。`postinst` 为**本应用自己的用户**补一条 `r-x`（仅穿越、不继承）。这是对平台缺陷的最小修复，见 `docs/PLATFORM-DEFECT.md`；`postrm` 卸载时删除 |
 | 系统用户：`le3gold-xunlei` | 非 root 身份隔离运行 |
 | root 权限 | **无** |
 | 系统目录写入 | **无**（生命周期脚本安装 systemd 单元与 nginx 片段属平台既有模型，见官方模板 `DEBIAN/postinst`；另见下方第 7 节 `/etc/os-release` 特例） |
@@ -153,12 +158,34 @@ TOS 会把应用文件迁移到 `/Volume*/@apps/<appid>/`（指南 10.7）。
 `/var/lib/le3gold-xunlei/runtime/`（系统盘，属主为应用用户），systemd 从该副本启动。
 包内原始文件仍完整保留在应用目录中，只是服务运行时不依赖它。
 这是**读取自己的文件**，不涉及任何额外系统权限；见运行期文件清单。
-### 7.2 共享文件夹 ACL
+### 7.2 共享文件夹 ACL（平台缺陷 + 最小绕过）
 
-`/Volume*` 以 `tmacl` 挂载，非 root 用户默认无法写入，需要对应用用户显式授权。
-本包按指南 10.6 与一方应用（qBittorrent / Transmission）完全一致的方式调用
-`ter_share_add -owner` + `tmacltool modify`；若平台尚未授好权，启动脚本会实测可写性
-并回退到 `/var/lib/le3gold-xunlei/download`，同时在日志中明确告警。
+`postinst` 按指南 10.6 调用 `ter_share_add -name XunLeiPlus -owner le3gold-xunlei`，
+并在文件夹本体上给应用用户授权；这一步是标准做法，但**只做这一步，文件夹依然不可用**。
+
+原因在卷根：`/Volume*` 以 `tmacl` 挂载，这套 TerraMaster 富 ACL 是**默认拒绝**，
+且**不回落到 POSIX mode 位**。真机实测（TOS 7，内核 6.12.63）：
+
+| 观测 | 结果 |
+|---|---|
+| `ls -ld /Volume1` | `drwxr-xr-x+`（755，别的用户本应可穿越） |
+| `tmacltool get /Volume1` | **空**（全机所有卷根都没有任何 ACL 条目） |
+| `tmacltool get-perm /Volume1 <应用 uid>` | `max_permission: -------------` |
+| 以应用用户 `ls /Volume1` | `Permission denied` |
+| 以内置 `qbittorrent`/`transmission`、以及普通 TOS 用户身份 | 同样 `Permission denied` |
+
+穿越一个路径需要**每一层**都有权限。共享文件夹自身的条目是对的，但上方卷根一个
+条目都没有，于是它永远不可达 —— 这正是 `ter_share_add -owner` 单独用不够的原因。
+
+本包的处理：`postinst` 为**本应用自己的用户**、在**承载该文件夹的那个卷**上补一条
+`r-x`（仅穿越，无继承）。读写权限仍全部来自文件夹本体的条目，这条只解决"够得着"。
+这是对平台缺陷的最小修复，完整取证、构造方法、以及平台该怎么修见
+`docs/PLATFORM-DEFECT.md`；`postrm` 会在卸载时删掉它。平台修好后本包应立即删除
+这段代码。
+
+启动脚本不再尝试改 ACL（它以应用用户身份运行，本来就改不动），改为实测下载目录
+可写性；只有在授权仍然缺失时才回退到 `/var/lib/le3gold-xunlei/download` 并**明确告警**
+（系统盘仅剩约 3.2 GB，这个回退绝不应该是常态）。
 
 ---
 
@@ -198,7 +225,7 @@ TOS 会把应用文件迁移到 `/Volume*/@apps/<appid>/`（指南 10.7）。
 | 安全 | 无硬编码凭据、无网络型生命周期脚本（不 `apt/pip install`、不 `curl \| bash`）、无 `/etc/hosts` 等敏感写入、`ProtectSystem=strict`、日志不含敏感信息、二进制 `sha256` 逐字节校验 |
 | 合规 | 仓库公开、README 完整、目录结构符合 8.2、`descript` 与实际功能一致 |
 
-> 包结构由 `python build.py` 内置的 **独立验证器（224 项断言）** 复核：
+> 包结构由 `python build.py` 内置的 **独立验证器（230 项断言）** 复核：
 > 重新解析 `ar` 与两个 tar，逐项检查 `config.ini`、14 语言、systemd 单元、
 > nginx 片段、生命周期脚本、二进制 sha256。验证不通过则构建失败。
 
@@ -235,8 +262,9 @@ TOS 会把应用文件迁移到 `/Volume*/@apps/<appid>/`（指南 10.7）。
 
 - 应用 ID / 版本 / 平台 / 资源名 / sha256：
   `le3gold-xunlei` / `1.0.0` / `x86_64` / `le3gold-xunlei_x86_64.deb` /
-  `8e68e177fd6518f6eec94956bb1cf3908f00a53e732f1d7572a85fca2916c3ee`
-- 真机：TOS 7（内核 6.12.63）安装后服务 `active` + `enabled`，
+  `27522491ed377225e4afec72d4c98ef3281b0daffaf171c8c2387e5e8e264491`
+- 真机：TOS 7（内核 6.12.63）安装后服务 `active` + `enabled`，引擎上报
+  `download_paths: ["/Volume1/XunLeiPlus/download/"]`，且以应用用户身份实测可写该目录；
   `http://<NAS>:8181/le3gold-xunlei/app/` 返回 200，静态资源 200（1,527,665 字节），
   `POST …/device/info/watch` 返回 403 JSON 鉴权响应（说明请求真实到达迅雷 API）。
 - 引擎与启动器的来源、大小、`sha256`/`md5` 记录在包内

@@ -58,15 +58,13 @@ fi
 log "shared folder: ${SHARE_PATH}"
 
 # 1b. TerraMaster rich ACL. The engine is unprivileged and /Volume* is
-#     mounted with the "tmacl" option, so without an explicit allow entry for
-#     this user every write into the shared folder fails with EACCES. The
-#     first-party qBittorrent and Transmission applications make the same
-#     call from their service scripts (guide 10.6); repeating it here also
-#     covers the case where the folder was recreated after installation.
-if command -v tmacltool >/dev/null 2>&1; then
-    tmacltool modify "${SHARE_PATH}" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true
-    tmacltool modify "${SHARE_PATH}/download" "user:${APP_ID}:allow:rwxpdDaARWc:fd" >/dev/null 2>&1 || true
-fi
+#     mounted with the "tmacl" option, so the folder is only writable when
+#     this user holds an entry on the folder itself *and* a traversal entry
+#     on the volume root that contains it. Both are granted by the lifecycle
+#     scripts, which run as root; this entry point runs as the application
+#     user and cannot change an ACL, so it reports the situation instead of
+#     trying. See docs/PLATFORM-DEFECT.md. After the folder has been
+#     recreated by hand, re-run:  sudo dpkg-reconfigure @@APP_ID@@
 
 # 2. App-owned runtime state. Never inside the shared folder.
 mkdir -p "${DATA_DIR}/bin" "${DATA_DIR}/.drive" "${DATA_DIR}/download" 2>/dev/null || true
@@ -82,6 +80,8 @@ if ! mkdir -p "${DOWNLOAD_PATH}" 2>/dev/null || ! touch "${DOWNLOAD_PATH}/.${APP
     log "WARNING: ${SHARE_PATH}/download is not writable by $(id -un)."
     log "WARNING: downloads are stored in ${DOWNLOAD_PATH} instead, which is"
     log "WARNING: not visible in the shared folder over SMB/NFS."
+    log "WARNING: the cause is a missing ACL entry for $(id -un), either on"
+    log "WARNING: ${SHARE_PATH} or on the volume root above it (/Volume<N>)."
     log "WARNING: grant ${APP_ID} write access to ${SHARE_PATH} and restart"
     log "WARNING: the application, or run:  sudo dpkg-reconfigure ${APP_ID}"
     mkdir -p "${DOWNLOAD_PATH}" 2>/dev/null || true

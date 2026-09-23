@@ -77,6 +77,7 @@ systemctl status le3gold-xunlei
 | 文件系统：`/var/lib/le3gold-xunlei` | 引擎运行态数据、日志、登录态、引擎自更新副本 |
 | 文件系统：`/usr/local/le3gold-xunlei` | 程序本体（服务只读） |
 | 共享文件夹：`XunLeiPlus` | 用户可见的下载内容，SMB/NFS 可取 |
+| 共享文件夹 ACL：所载卷根的**穿越**权限 | 平台缺陷的最小绕过：tmacl 默认拒绝所有非 root 用户穿越卷根，文件夹自身的 ACL 因此不可达。`postinst` 为本应用自己的用户补一条 `r-x`（仅穿越、不继承），见 `docs/PLATFORM-DEFECT.md` |
 | 用户：`le3gold-xunlei`（系统用户） | 以非 root 身份隔离运行服务 |
 | 系统目录写入 | **无**（唯一例外见下方 `/etc/os-release` 修复） |
 | root 权限 | **无**（`User=root` 被审核红线禁止，本包不使用） |
@@ -94,7 +95,7 @@ systemctl status le3gold-xunlei
 | `/var/lib/le3gold-xunlei/{CidStore.DB,seq_id,setting.cfg}` | 首次启动 | 引擎写在其工作目录下的状态文件 | 删除 |
 | `/var/lib/le3gold-xunlei/pan-cli.log` | 首次启动 | 引擎日志（10MB 轮转） | 删除 |
 | `/var/lib/le3gold-xunlei/pan-cli.pid`、`pan-cli.pid.child` | 首次启动 | 启动器与引擎 PID | 删除 |
-| `/Volume1/XunLeiPlus/download/**` | `postinst` | **用户数据**：下载完成的文件，SMB/NFS 可见 | **保留** |
+| `/Volume*/XunLeiPlus/download/**` | `postinst` | **用户数据**：下载完成的文件，SMB/NFS 可见 | **保留** |
 | `/etc/nginx/conf.d/le3gold-xunlei.conf` | `postinst` | 把 `/le3gold-xunlei/app/` 反代到 `127.0.0.1:18889` | 删除 |
 | `/etc/systemd/system/le3gold-xunlei.service` | `postinst` | 服务单元 | 删除 |
 | `/var/log/le3gold-xunlei-maint.log` | `postinst` | 生命周期脚本日志 | 删除 |
@@ -119,32 +120,51 @@ TOS 上旧版迅雷应用（`xunleipan 2.9.1`）把 `/etc/os-release` 换成了�
 `bin/le3gold-xunlei` 启动时也会再检查一次并给出明确告警，可用
 `sudo dpkg-reconfigure le3gold-xunlei` 重跑修复。
 
-### 2. 共享文件夹权限与下载回退
+### 2. 共享文件夹权限：卷根穿越（TOS 7 平台缺陷）
 
-`/Volume*` 以 `tmacl` 选项挂载，由 TerraMaster 的 Rich ACL（内核模块 `tmacl_vfs`）管控：
-**非 root 用户默认无法在其中写入**，必须对该用户显式授权。本包按官方指南 10.6 与
-一方应用（qBittorrent / Transmission）完全一致的做法处理：
+`/Volume*` 以 `tmacl` 选项挂载，由 TerraMaster 的 Rich ACL（内核模块 `tmacl_vfs`）
+管控。本包按官方指南 10.6 与一方应用（qBittorrent / Transmission）一致的做法处理：
 
 ```bash
 ter_share_add -name XunLeiPlus -owner le3gold-xunlei
 tmacltool modify /Volume1/XunLeiPlus "user:le3gold-xunlei:allow:rwxpdDaARWc:fd"
 ```
 
-如果平台没有（或还没）授好权，`bin/le3gold-xunlei` 会**实测共享目录是否可写**：
-不可写时自动把下载目录回退到 `/var/lib/le3gold-xunlei/download` 并在日志里明确告警，
-而不是让每个任务都失败。
+**但只做这两步，文件夹依然不可用。** 实测（TOS 7，内核 6.12.63）：tmacl 是
+**默认拒绝**，且**不回落到 POSIX mode 位**；而全机**所有卷根**（`/Volume1`、
+`/Volume10` …）的 ACL 都是**空的**：
 
-> 实测备注：测试机（TOS 7，内核 6.12.63）上即使是 TOS 自带应用的运行用户，
-> 也无法写入 `/Volume1` 下任何目录（含 777 目录），ACL 已授权的情况下依然 `EACCES`。
-> 这属于该机器的 ACL 层状态，不是本包引入的问题；本包因此必须带这个回退。
+| 观测 | 结果 |
+|---|---|
+| `ls -ld /Volume1` | `drwxr-xr-x+`（755，others 本应可穿越） |
+| `tmacltool get /Volume1` | 空 |
+| `tmacltool get-perm /Volume1 <应用 uid>` | `max_permission: -------------` |
+| 以应用用户访问该文件夹 | `Permission denied` |
+| 以 TOS 内置 `qbittorrent` / `transmission`、或普通 TOS 用户访问 | 同样 `Permission denied` |
+
+穿越一个路径需要**每一层**都有权限，卷根这一层就把所有非 root 用户拦死了；文件夹
+自身的 ACL 再正确也够不着。**这也解释了为什么 TOS 自带的 30 个应用全部以 root 运行。**
+
+因此 `postinst` 步骤 **3a** 额外在承载共享文件夹的那个卷的卷根上，为**本应用自己的
+用户**补一条 `user:<appid>:allow:r-x:--`：仅穿越、不带继承、只授自己；读写权限仍全部
+来自文件夹本体的条目。`postrm` 卸载时删除它。
+
+启动脚本不再尝试改 ACL（它以应用用户身份运行，本来就改不动），改为**实测下载目录
+可写性**；缺失时才回退到 `/var/lib/le3gold-xunlei/download` 并**明确告警**（系统盘只剩
+约 3.2 GB，这个回退不该是常态）。
+
+> 完整取证、3 条命令的复现步骤、以及给平台的修复建议见 `docs/PLATFORM-DEFECT.md`。
+> 平台修好后应删掉 `postinst` 的 3a 段、`postrm` 的对应段，以及验证器里绑定这两段
+> 的断言。
 
 ### 3. 应用文件被平台放到存储卷上，运行用户可能读不到
 
 TOS 会把第三方应用安装到存储卷：`/Volume1/@apps/le3gold-xunlei/`，
 并把 `/usr/local/le3gold-xunlei` 做成指向它的符号链接（指南 10.7）。
 
-问题在于 `/Volume*` 以 `tmacl` 挂载，而**运行用户对 `/Volume1/@apps` 及其下任何
-目录都没有访问权**（权限位是 755，是 ACL 层拒绝的；`tmacltool` 授权后依然 `EACCES`）。
+问题在于 `/Volume*` 以 `tmacl` 挂载，而**运行用户对 `/Volume1/@apps` 及其下任何目录
+都没有访问权**：与第 2 点同源 —— 卷根 `/Volume1` 没有任何 ACE，非 root 用户连穿越都
+做不到（权限位是 755，拦在 ACL 层；只在子目录上授权也解决不了）。
 后果是 systemd 连 `WorkingDirectory` 都设不进去，服务以
 `status=200/CHDIR` 失败，nginx 反代 502。
 
@@ -166,10 +186,10 @@ systemd 从这份副本启动，`WorkingDirectory` 用应用状态目录。
 | 8.12 | iframe 应用**不使用** `PrivateTmp=true`（否则 `/var/api`、`/var/log` 悬空） |
 | 8.14 / 10.3 | `config.ini.user` = `le3gold-xunlei`，systemd `User=` 同名；生命周期脚本**不创建用户**；`User=root` 禁止 |
 | 10.4 | 程序与配置对服务只读，只有数据/日志目录可写；`ProtectSystem=strict` + `ReadWritePaths` |
-| 10.6 | 共享文件夹用 `ter_share_add -owner` 创建，并按一方应用方式补 Rich ACL |
+| 10.6 | 共享文件夹用 `ter_share_add -owner` 创建并按一方应用方式补 Rich ACL；另因平台缺陷补卷根穿越权限（见上文第 2 点，`docs/PLATFORM-DEFECT.md`） |
 | 10.7 / 12.1 | 包内布局与官方单包模板一致（`/usr/local/<id>`）；平台会把文件迁移到 `/Volume*/@apps/<id>`，本包为此提供运行时副本（见上文第 3 点） |
 | 12.9.6 | 运行期文件清单见上 |
-| 发布 | Release 资源名 `<应用ID>_<平台>.deb`，不带版本号 |
+| 发布 | Release 资源名用推荐格式 `<应用ID>_<平台>.deb`（2026-09-23 起平台只按扩展名判定包型，命名不再是强制项）；版本以 `config.ini.version` 为准，**Release tag 不参与版本判定** |
 | nginx | 只用平台已定义的变量（TOS 的 nginx **没有** `$connection_upgrade`，故用字面量 `Connection upgrade`） |
 
 ## 来源与审计链

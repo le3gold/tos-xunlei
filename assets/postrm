@@ -15,6 +15,18 @@ case "$1" in
     systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || true
     rm -rf "/var/lib/${APP_ID}"
     rm -rf "/usr/local/${APP_ID}/webui"
+
+    # Undo the volume-root traversal entry that postinst 3a adds, so that a
+    # removed application does not leave an entry behind for a user that TOS
+    # deletes along with it. The directory itself is never touched: it is the
+    # volume root, and it belongs to the platform.
+    if command -v tmacltool >/dev/null 2>&1; then
+      for _vol in /Volume[0-9]*; do
+        [ -d "${_vol}" ] || continue
+        tmacltool del "${_vol}" "user:${APP_ID}:allow:r-x:--" >/dev/null 2>&1 || true
+      done
+    fi
+
     # The shared folder /Volume*/${SHARE_NAME} and everything in it is USER
     # DATA and is deliberately left untouched.
     ;;
